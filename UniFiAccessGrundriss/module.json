@@ -1,0 +1,15 @@
+{
+    "id": "{D282D828-200B-41CE-BA29-960F1DAB54F5}",
+    "name": "UniFi Access Grundriss",
+    "type": 3,
+    "vendor": "Ubiquiti",
+    "aliases": [
+        "UniFi Access Grundriss",
+        "UniFi Access Floor Plan"
+    ],
+    "url": "",
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "UACFP"
+}

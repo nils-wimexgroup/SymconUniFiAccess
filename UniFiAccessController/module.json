@@ -1,0 +1,16 @@
+{
+    "id": "{DEAF2759-F7B9-45FD-80E5-3BBE8DE3FB0A}",
+    "name": "UniFi Access Controller",
+    "type": 3,
+    "vendor": "Ubiquiti",
+    "aliases": [
+        "UniFi Access",
+        "UniFi Access Controller",
+        "UniFi Tueren"
+    ],
+    "url": "",
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "UAC"
+}

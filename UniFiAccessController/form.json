@@ -1,0 +1,319 @@
+{
+    "elements": [
+        {
+            "type": "CheckBox",
+            "name": "Active",
+            "caption": "Instanz aktiv"
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "UniFi Access Controller",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "ValidationTextBox",
+                    "name": "Host",
+                    "caption": "IP-Adresse / Hostname",
+                    "width": "300px"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "Port",
+                    "caption": "Port",
+                    "minimum": 1,
+                    "maximum": 65535,
+                    "width": "150px"
+                },
+                {
+                    "type": "PasswordTextBox",
+                    "name": "Token",
+                    "caption": "API-Token",
+                    "width": "500px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Token erzeugen in UniFi Access: Einstellungen → Allgemein → Erweitert → API-Token."
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "Interval",
+                    "caption": "Abfrageintervall",
+                    "suffix": "Sekunden",
+                    "minimum": 0,
+                    "maximum": 86400,
+                    "width": "200px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "0 = keine automatische Abfrage (nur manuell bzw. per Skript)."
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "Timeout",
+                    "caption": "Timeout",
+                    "suffix": "Millisekunden",
+                    "minimum": 500,
+                    "maximum": 60000,
+                    "width": "200px"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "VerifyTLS",
+                    "caption": "TLS-Zertifikat prüfen (bei selbstsigniertem Zertifikat deaktiviert lassen)"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Sirene (Shelly 1 Gen4)",
+            "expanded": false,
+            "items": [
+                {
+                    "type": "Label",
+                    "caption": "Die Sirene wird pro Tür in der Türliste weiter unten eingetragen (IP-Adresse und Bezeichnung). Hier stehen nur die Einstellungen, die für alle Shellys gelten."
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "ShellyChannel",
+                    "caption": "Relais-Kanal (beim Shelly 1 Gen4 immer 0)",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "width": "300px"
+                },
+                {
+                    "type": "ValidationTextBox",
+                    "name": "ShellyUser",
+                    "caption": "Benutzer (Gen2+ immer admin)",
+                    "width": "200px"
+                },
+                {
+                    "type": "PasswordTextBox",
+                    "name": "ShellyPassword",
+                    "caption": "Passwort (leer = keine Authentifizierung)",
+                    "width": "300px"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SirenMaxRuntime",
+                    "caption": "Maximale Sirenenlaufzeit",
+                    "suffix": "Sekunden",
+                    "minimum": 0,
+                    "maximum": 3600,
+                    "width": "200px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "0 = unbegrenzt. Sonst schaltet die Sirene nach dieser Zeit ab und geht erst wieder an, wenn die Tür zwischenzeitlich geschlossen war."
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SirenCheckInterval",
+                    "caption": "Shelly-Zustand abfragen alle",
+                    "suffix": "Sekunden",
+                    "minimum": 0,
+                    "maximum": 3600,
+                    "width": "250px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Fragt den tatsächlichen Relaiszustand aller eingetragenen Shellys ab und vergleicht ihn mit dem Sollwert. Unabhängig davon wird direkt nach jedem Schaltvorgang nachgefragt. 0 = keine zyklische Abfrage."
+                },
+                {
+                    "type": "Button",
+                    "caption": "Shellys abfragen",
+                    "onClick": "UAC_ShowSirenStatus($id);"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Zum Testen einer einzelnen Sirene gibt es in der Kachel im Abschnitt \"Sirenen\" je Shelly die Schaltflächen EIN und AUS."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Türen / Sirenenalarm",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "Label",
+                    "caption": "Mit \"Türen vom Controller laden\" wird die Liste befüllt. Danach \"Übernehmen\" klicken."
+                },
+                {
+                    "type": "List",
+                    "name": "DoorSettings",
+                    "caption": "Türen",
+                    "rowCount": 8,
+                    "add": {
+                        "DoorID": "",
+                        "DoorName": "",
+                        "AlarmEnabled": false,
+                        "OpenDelay": 60,
+                        "ShellyHost": "",
+                        "ShellyName": ""
+                    },
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Tür-ID",
+                            "name": "DoorID",
+                            "width": "300px",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Name",
+                            "name": "DoorName",
+                            "width": "auto",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Alarm",
+                            "name": "AlarmEnabled",
+                            "width": "80px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
+                        },
+                        {
+                            "caption": "Offen länger als",
+                            "name": "OpenDelay",
+                            "width": "160px",
+                            "add": 60,
+                            "edit": {
+                                "type": "NumberSpinner",
+                                "suffix": "Sekunden",
+                                "minimum": 1,
+                                "maximum": 86400
+                            }
+                        },
+                        {
+                            "caption": "Shelly IP-Adresse",
+                            "name": "ShellyHost",
+                            "width": "180px",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Bezeichnung der Sirene",
+                            "name": "ShellyName",
+                            "width": "200px",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "RemoveOrphans",
+                    "caption": "Türen, die der Controller nicht mehr meldet, automatisch aus dem Objektbaum entfernen"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Verlauf und Wartung",
+            "expanded": false,
+            "items": [
+                {
+                    "type": "NumberSpinner",
+                    "name": "HistoryLimit",
+                    "caption": "Einträge im Verlauf",
+                    "minimum": 10,
+                    "maximum": 2000,
+                    "width": "200px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Der Verlauf wird in der Kachel angezeigt (Reiter \"Verlauf\") und hält die letzten Öffnungen mit Dauer und Sireneneinsatz fest."
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "BypassReset",
+                    "caption": "Wartungsmodus automatisch beenden nach",
+                    "suffix": "Minuten",
+                    "minimum": 0,
+                    "maximum": 1440,
+                    "width": "250px"
+                },
+                {
+                    "type": "Label",
+                    "caption": "0 = Wartungsmodus bleibt aktiv, bis er von Hand wieder eingeschaltet wird."
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "ArchiveDoorStates",
+                    "caption": "\"Tür offen\" und \"Sirenenalarm\" im Archiv protokollieren (für IPS-Diagramme)"
+                }
+            ]
+        }
+    ],
+    "actions": [
+        {
+            "type": "RowLayout",
+            "items": [
+                {
+                    "type": "Button",
+                    "caption": "Verbindung testen",
+                    "onClick": "UAC_TestConnection($id);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Türen vom Controller laden",
+                    "onClick": "UAC_LoadDoors($id);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Jetzt abfragen",
+                    "onClick": "UAC_Poll($id);"
+                },
+                {
+                    "type": "Button",
+                    "caption": "Objektbaum aufräumen",
+                    "onClick": "UAC_CleanupDoors($id);"
+                }
+            ]
+        }
+    ],
+    "status": [
+        {
+            "code": 101,
+            "icon": "inactive",
+            "caption": "Instanz wird erstellt"
+        },
+        {
+            "code": 102,
+            "icon": "active",
+            "caption": "Instanz ist aktiv"
+        },
+        {
+            "code": 104,
+            "icon": "inactive",
+            "caption": "Instanz ist deaktiviert"
+        },
+        {
+            "code": 201,
+            "icon": "error",
+            "caption": "IP-Adresse des Controllers fehlt"
+        },
+        {
+            "code": 202,
+            "icon": "error",
+            "caption": "API-Token fehlt"
+        },
+        {
+            "code": 203,
+            "icon": "error",
+            "caption": "Controller nicht erreichbar / API-Fehler"
+        }
+    ]
+}

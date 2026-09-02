@@ -1,0 +1,12 @@
+{
+    "id": "{6D147997-7685-424F-92AC-2EECB1B7D25E}",
+    "author": "Wimex Gruppe",
+    "name": "UniFi Access",
+    "url": "https://github.com/nils-wimexgroup/SymconUniFiAccess",
+    "compatibility": {
+        "version": "7.1"
+    },
+    "version": "1.0",
+    "build": 1,
+    "date": 0
+}

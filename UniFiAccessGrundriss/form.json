@@ -1,0 +1,72 @@
+{
+    "elements": [
+        {
+            "type": "SelectInstance",
+            "name": "ControllerID",
+            "caption": "UniFi Access Controller",
+            "validModules": [
+                "{DEAF2759-F7B9-45FD-80E5-3BBE8DE3FB0A}"
+            ],
+            "width": "400px"
+        },
+        {
+            "type": "SelectMedia",
+            "name": "FloorPlanMedia",
+            "caption": "Grundriss-Bild (Medienobjekt)",
+            "width": "400px"
+        },
+        {
+            "type": "Label",
+            "caption": "Medienobjekt vom Typ Bild anlegen (PNG, JPG, WEBP, GIF oder SVG) und hier auswählen. Das Bild wird in die Kachel eingebettet – je kleiner die Datei, desto schneller lädt die Visualisierung. Unter 1 MB ist eine gute Richtgröße."
+        },
+        {
+            "type": "ValidationTextBox",
+            "name": "Caption",
+            "caption": "Überschrift in der Kachel (optional)",
+            "width": "400px"
+        },
+        {
+            "type": "CheckBox",
+            "name": "ShowLabels",
+            "caption": "Türnamen auf dem Grundriss anzeigen"
+        },
+        {
+            "type": "CheckBox",
+            "name": "OnlyPlaced",
+            "caption": "Nur platzierte Türen berücksichtigen (für mehrere Etagen sinnvoll)"
+        },
+        {
+            "type": "Label",
+            "caption": "Die Türen werden direkt in der Kachel platziert: \"Türen platzieren\" → Tür auswählen → auf den Grundriss klicken. Verschieben per Ziehen, ein Klick auf eine gesetzte Tür nimmt sie wieder herunter."
+        }
+    ],
+    "actions": [
+        {
+            "type": "Button",
+            "caption": "Alle Türpositionen zurücksetzen",
+            "onClick": "UACFP_ClearDoorPositions($id);"
+        }
+    ],
+    "status": [
+        {
+            "code": 102,
+            "icon": "active",
+            "caption": "Instanz ist aktiv"
+        },
+        {
+            "code": 201,
+            "icon": "error",
+            "caption": "Bitte eine UniFi Access Controller Instanz auswählen"
+        },
+        {
+            "code": 202,
+            "icon": "error",
+            "caption": "Die ausgewählte Instanz ist kein UniFi Access Controller"
+        },
+        {
+            "code": 203,
+            "icon": "error",
+            "caption": "Bitte ein Grundriss-Bild auswählen"
+        }
+    ]
+}

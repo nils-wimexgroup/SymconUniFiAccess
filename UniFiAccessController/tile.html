@@ -1,0 +1,434 @@
+<style>
+.uac { font-family: inherit; color: inherit; font-size: 14px; line-height: 1.35; }
+.uac * { box-sizing: border-box; }
+
+.uac-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.uac-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; background: #9e9e9e; }
+.uac-dot.ok { background: #2e9e4f; }
+.uac-dot.err { background: #d64545; }
+.uac-meta { opacity: .65; font-size: 12px; }
+.uac-spacer { flex: 1 1 auto; }
+
+.uac-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.uac-tab {
+    padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    background: rgba(127,127,127,.14); border: none; color: inherit; font-family: inherit;
+}
+.uac-tab.active { background: rgba(127,127,127,.34); font-weight: 600; }
+
+.uac-btn {
+    padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    background: rgba(127,127,127,.14); border: none; color: inherit; font-family: inherit;
+}
+.uac-btn:hover { background: rgba(127,127,127,.26); }
+
+.uac-list { display: flex; flex-direction: column; gap: 6px; max-height: 460px; overflow-y: auto; }
+.uac-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; border-radius: 8px; background: rgba(127,127,127,.10);
+}
+.uac-row.alarm { background: rgba(214,69,69,.20); }
+.uac-name { font-weight: 600; min-width: 120px; flex: 1 1 140px; }
+.uac-sub { font-size: 12px; opacity: .6; font-weight: 400; }
+
+.uac-badge {
+    padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap;
+    background: rgba(127,127,127,.20);
+}
+.uac-badge.open { background: rgba(230,145,30,.28); }
+.uac-badge.closed { background: rgba(46,158,79,.24); }
+.uac-badge.alarm { background: rgba(214,69,69,.35); font-weight: 600; }
+
+.uac-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.uac-switch input { display: none; }
+.uac-track {
+    width: 34px; height: 18px; border-radius: 999px; background: rgba(127,127,127,.35);
+    position: relative; transition: background .15s;
+}
+.uac-track::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: #fff; transition: transform .15s;
+}
+.uac-switch input:checked + .uac-track { background: #2e9e4f; }
+.uac-switch input:checked + .uac-track::after { transform: translateX(16px); }
+.uac-switch.off { color: #d64545; font-weight: 600; }
+
+.uac-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.uac-table th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    opacity: .55; padding: 4px 8px; font-weight: 600;
+}
+.uac-table td { padding: 5px 8px; border-top: 1px solid rgba(127,127,127,.20); }
+.uac-table tr.siren td { background: rgba(214,69,69,.14); }
+.uac-scroll { max-height: 440px; overflow-y: auto; }
+.uac-empty { padding: 16px; text-align: center; opacity: .55; font-size: 13px; }
+.uac-error {
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 8px; font-size: 12px;
+    background: rgba(214,69,69,.20);
+}
+.uac-filter {
+    font-family: inherit; font-size: 12px; color: inherit; padding: 4px 6px;
+    border-radius: 6px; border: 1px solid rgba(127,127,127,.35); background: transparent;
+}
+.uac-filter option { color: #000; }
+
+.uac-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(127,127,127,.22); }
+.uac-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    opacity: .55; font-weight: 600;
+}
+</style>
+
+<div class="uac" id="uac-root"></div>
+
+<script>
+var UAC_DATA = /*%%PAYLOAD%%*/null;
+var UAC_TAB = 'status';
+var UAC_FILTER = '';
+var UAC_OFFSET = 0;
+var UAC_SIGNATURE = null;
+
+/* ---------- Kommunikation mit dem Modul ---------- */
+
+function handleMessage(data) {
+    try {
+        UAC_DATA = (typeof data === 'string') ? JSON.parse(data) : data;
+    } catch (e) {
+        return;
+    }
+    uacSyncClock();
+    uacRefreshView();
+}
+
+function uacToggleSiren(ident, checked) {
+    requestAction(ident, checked);
+}
+
+function uacRefresh() {
+    requestAction('Refresh', true);
+}
+
+function uacClearHistory() {
+    requestAction('ClearHistory', true);
+}
+
+function uacCheckSirens() {
+    requestAction('CheckSirens', true);
+}
+
+function uacTestSiren(host, on) {
+    requestAction('TestSiren', JSON.stringify({ host: host, on: on }));
+}
+
+/* ---------- Hilfsfunktionen ---------- */
+
+function uacSyncClock() {
+    if (UAC_DATA && UAC_DATA.now) {
+        UAC_OFFSET = UAC_DATA.now * 1000 - Date.now();
+    }
+}
+
+function uacNow() {
+    return Math.floor((Date.now() + UAC_OFFSET) / 1000);
+}
+
+function uacEsc(text) {
+    return String(text === null || text === undefined ? '' : text)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function uacDuration(seconds) {
+    seconds = Math.max(0, Math.floor(seconds));
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    var s = seconds % 60;
+    var pad = function (v) { return v < 10 ? '0' + v : String(v); };
+    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+}
+
+function uacTime(ts) {
+    if (!ts) { return '-'; }
+    return new Date(ts * 1000).toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+}
+
+function uacAgo(ts) {
+    if (!ts) { return 'nie'; }
+    var diff = Math.max(0, uacNow() - ts);
+    if (diff < 60) { return 'vor ' + diff + ' s'; }
+    if (diff < 3600) { return 'vor ' + Math.floor(diff / 60) + ' min'; }
+    return uacTime(ts);
+}
+
+function uacSetTab(tab) {
+    UAC_TAB = tab;
+    uacRender();
+}
+
+function uacSetFilter(value) {
+    UAC_FILTER = value;
+    uacRender();
+}
+
+/* ---------- Rendering ---------- */
+
+/**
+ * Nur neu aufbauen, wenn sich strukturell etwas geaendert hat. Sonst wuerde
+ * das sekuendliche Update laufende Eingaben (Filter-Dropdown) unterbrechen.
+ */
+function uacSignature(data) {
+    var parts = [UAC_TAB, UAC_FILTER, data.status, data.error || ''];
+    (data.doors || []).forEach(function (door) {
+        parts.push([door.id, door.name, door.open, door.alarm, door.siren,
+            door.sensor, door.monitored, door.lock, door.since, door.delay].join(','));
+    });
+    (data.events || []).forEach(function (event) {
+        parts.push([event.name, event.start, event.end, event.siren ? 1 : 0].join(','));
+    });
+    (data.sirens || []).forEach(function (siren) {
+        parts.push([siren.host, siren.name, siren.channel, siren.checked, siren.reachable,
+            siren.output, siren.target, siren.mismatch, siren.ts, siren.error].join(','));
+    });
+    return parts.join('|');
+}
+
+function uacRefreshView() {
+    var signature = UAC_DATA ? uacSignature(UAC_DATA) : '';
+    if (signature !== UAC_SIGNATURE) {
+        uacRender();
+    } else {
+        uacTick();
+    }
+}
+
+function uacTick() {
+    var now = uacNow();
+    var root = document.getElementById('uac-root');
+    if (!root) { return; }
+
+    var durations = root.querySelectorAll('.uac-dur');
+    for (var i = 0; i < durations.length; i++) {
+        var since = parseInt(durations[i].getAttribute('data-since'), 10);
+        durations[i].textContent = uacDuration(now - (since || now));
+    }
+
+    var ago = root.querySelector('.uac-ago');
+    if (ago && UAC_DATA) {
+        ago.textContent = uacAgo(UAC_DATA.lastPoll);
+    }
+}
+
+function uacRenderStatus(data) {
+    if (!data.doors || data.doors.length === 0) {
+        return '<div class="uac-empty">Noch keine T&uuml;ren abgerufen.</div>';
+    }
+
+    var now = uacNow();
+    var html = '<div class="uac-list">';
+
+    data.doors.forEach(function (door) {
+        var badge;
+        var rowClass = '';
+
+        if (!door.sensor) {
+            badge = '<span class="uac-badge">kein T&uuml;rkontakt</span>';
+        } else if (door.open) {
+            var live = '<span class="uac-dur" data-since="' + (door.since || now) + '">' +
+                uacDuration(now - (door.since || now)) + '</span>';
+            if (door.alarm) {
+                rowClass = ' alarm';
+                badge = '<span class="uac-badge alarm">ALARM &middot; offen ' + live + '</span>';
+            } else {
+                badge = '<span class="uac-badge open">offen ' + live + '</span>';
+            }
+        } else {
+            badge = '<span class="uac-badge closed">geschlossen</span>';
+        }
+
+        var lock = '';
+        if (door.lock === 'lock') {
+            lock = '<span class="uac-badge">verriegelt</span>';
+        } else if (door.lock === 'unlock') {
+            lock = '<span class="uac-badge">entriegelt</span>';
+        } else if (door.lock) {
+            lock = '<span class="uac-badge">' + uacEsc(door.lock) + '</span>';
+        }
+
+        var sub = door.monitored
+            ? 'Alarm nach ' + door.delay + ' s'
+            : 'keine Sirenen&uuml;berwachung';
+
+        var toggle = '';
+        if (door.monitored) {
+            toggle = '<label class="uac-switch' + (door.siren ? '' : ' off') + '">' +
+                '<input type="checkbox"' + (door.siren ? ' checked' : '') +
+                ' onchange="uacToggleSiren(\'' + uacEsc(door['switch']) + '\', this.checked)">' +
+                '<span class="uac-track"></span>' +
+                '<span>' + (door.siren ? 'Sirene' : 'Wartung') + '</span>' +
+                '</label>';
+        }
+
+        html += '<div class="uac-row' + rowClass + '">' +
+            '<div class="uac-name">' + uacEsc(door.name) +
+            '<div class="uac-sub">' + sub + '</div></div>' +
+            badge + lock + '<div class="uac-spacer"></div>' + toggle +
+            '</div>';
+    });
+
+    return html + '</div>';
+}
+
+function uacRenderSirens(data) {
+    var sirens = data.sirens || [];
+    if (sirens.length === 0) {
+        return '';
+    }
+
+    var html = '<div class="uac-section">' +
+        '<div class="uac-head"><span class="uac-section-title">Sirenen</span>' +
+        '<div class="uac-spacer"></div>' +
+        '<button class="uac-btn" onclick="uacCheckSirens()">Sirenen pr&uuml;fen</button></div>' +
+        '<div class="uac-list">';
+
+    sirens.forEach(function (siren) {
+        var state;
+        var rowClass = '';
+
+        if (!siren.checked) {
+            state = '<span class="uac-badge">noch nicht gepr&uuml;ft</span>';
+        } else if (!siren.reachable) {
+            rowClass = ' alarm';
+            state = '<span class="uac-badge alarm">antwortet nicht</span>';
+        } else if (siren.output === null) {
+            state = '<span class="uac-badge">Kanal ' + siren.channel + ' meldet keinen Zustand</span>';
+        } else {
+            state = '<span class="uac-badge ' + (siren.output ? 'open' : 'closed') + '">Relais ' +
+                (siren.output ? 'EIN' : 'AUS') + '</span>';
+        }
+
+        var compare = '';
+        if (siren.mismatch) {
+            rowClass = ' alarm';
+            compare = '<span class="uac-badge alarm">Soll: ' + (siren.target ? 'EIN' : 'AUS') + '</span>';
+        }
+
+        var meta = uacEsc(siren.host);
+        if (siren.checked) {
+            meta += (siren.reachable && !siren.error)
+                ? ' &middot; ' + uacTime(siren.ts) + ' &middot; ' + siren.ms + ' ms'
+                : ' &middot; ' + uacEsc(siren.error);
+        }
+
+        var test = '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.host) +
+            '\', true)">EIN</button> ' +
+            '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.host) +
+            '\', false)">AUS</button>';
+
+        html += '<div class="uac-row' + rowClass + '">' +
+            '<div class="uac-name">' + uacEsc(siren.name || siren.host) +
+            '<div class="uac-sub">' + meta + '</div></div>' +
+            state + compare + '<div class="uac-spacer"></div>' + test +
+            '</div>';
+    });
+
+    return html + '</div></div>';
+}
+
+function uacRenderHistory(data) {
+    var events = data.events || [];
+    var names = [];
+    events.forEach(function (event) {
+        if (names.indexOf(event.name) === -1) { names.push(event.name); }
+    });
+    names.sort();
+
+    var filter = '<select class="uac-filter" onchange="uacSetFilter(this.value)">' +
+        '<option value=""' + (UAC_FILTER === '' ? ' selected' : '') + '>Alle T&uuml;ren</option>';
+    names.forEach(function (name) {
+        filter += '<option value="' + uacEsc(name) + '"' +
+            (UAC_FILTER === name ? ' selected' : '') + '>' + uacEsc(name) + '</option>';
+    });
+    filter += '</select>';
+
+    var now = uacNow();
+    var rows = '';
+    var shown = 0;
+
+    events.forEach(function (event) {
+        if (UAC_FILTER !== '' && event.name !== UAC_FILTER) { return; }
+        shown++;
+
+        var running = !event.end;
+        var duration = running
+            ? '<span class="uac-dur" data-since="' + event.start + '">' +
+              uacDuration(now - event.start) + '</span>'
+            : uacDuration(event.end - event.start);
+
+        rows += '<tr' + (event.siren ? ' class="siren"' : '') + '>' +
+            '<td>' + uacEsc(event.name) + '</td>' +
+            '<td>' + uacTime(event.start) + '</td>' +
+            '<td>' + (running ? '<em>offen</em>' : uacTime(event.end)) + '</td>' +
+            '<td>' + duration + '</td>' +
+            '<td>' + (event.siren ? 'ja' : '&ndash;') + '</td>' +
+            '</tr>';
+    });
+
+    var head = '<div class="uac-head">' + filter +
+        '<span class="uac-meta">' + shown + ' Eintr&auml;ge</span>' +
+        '<div class="uac-spacer"></div>' +
+        '<button class="uac-btn" onclick="uacClearHistory()">Verlauf leeren</button></div>';
+
+    if (shown === 0) {
+        return head + '<div class="uac-empty">Keine Eintr&auml;ge vorhanden.</div>';
+    }
+
+    return head + '<div class="uac-scroll"><table class="uac-table"><thead><tr>' +
+        '<th>T&uuml;r</th><th>Ge&ouml;ffnet</th><th>Geschlossen</th><th>Dauer</th><th>Sirene</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function uacRender() {
+    var root = document.getElementById('uac-root');
+    if (!root) { return; }
+
+    var data = UAC_DATA;
+    if (!data) {
+        root.innerHTML = '<div class="uac-empty">Keine Daten. Bitte die Instanz einmal abfragen lassen.</div>';
+        return;
+    }
+
+    var healthy = (data.status === 102);
+    var html = '<div class="uac-head">' +
+        '<span class="uac-dot ' + (healthy ? 'ok' : 'err') + '"></span>' +
+        '<span class="uac-meta">Abfrage <span class="uac-ago">' + uacAgo(data.lastPoll) + '</span>' +
+        (data.duration ? ' &middot; ' + data.duration + ' ms' : '') + '</span>' +
+        '<div class="uac-spacer"></div>' +
+        '<button class="uac-btn" onclick="uacRefresh()">Aktualisieren</button>' +
+        '</div>';
+
+    if (!healthy && data.error) {
+        html += '<div class="uac-error">' + uacEsc(data.error) + ' (' + uacTime(data.errorAt) + ')</div>';
+    }
+
+    html += '<div class="uac-tabs">' +
+        '<button class="uac-tab' + (UAC_TAB === 'status' ? ' active' : '') +
+        '" onclick="uacSetTab(\'status\')">Status</button>' +
+        '<button class="uac-tab' + (UAC_TAB === 'history' ? ' active' : '') +
+        '" onclick="uacSetTab(\'history\')">Verlauf</button>' +
+        '</div>';
+
+    html += (UAC_TAB === 'history')
+        ? uacRenderHistory(data)
+        : uacRenderStatus(data) + uacRenderSirens(data);
+
+    root.innerHTML = html;
+    UAC_SIGNATURE = uacSignature(data);
+}
+
+uacSyncClock();
+uacRender();
+// Laufende Offen-Dauer sekundengenau mitzaehlen, ohne den Server zu fragen
+setInterval(uacTick, 1000);
+</script>
