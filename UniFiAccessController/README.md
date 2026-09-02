@@ -217,8 +217,10 @@ UAC_GetTileData(int $InstanceID);           // aktueller Türzustand als JSON (n
   mit Header `Authorization: Bearer <token>`
 * Shelly Gen2+ schalten: `POST http://<shelly>/rpc` mit `{"method":"Switch.Set","params":{"id":0,"on":true,"toggle_after":300}}`
 * Shelly-Authentifizierung: Digest SHA-256. Die Challenge liefert der Shelly bei HTTP
-  ausschließlich im `WWW-Authenticate`-Header (der Body der 401 ist leer). `ha2` ist dabei fest
-  `SHA256("POST:/rpc")` – das in der Shelly-Doku genannte `dummy_method:dummy_uri` gilt nur für
-  RPC über WebSocket. Der `nonce` ist Base64 und darf nicht in eine Zahl gewandelt werden, `nc`
-  ist Pflichtfeld.
+  ausschließlich im `WWW-Authenticate`-Header, der Body der 401 ist leer. Der `nonce` ist Base64
+  und darf nicht in eine Zahl gewandelt werden, `nc` ist Pflichtfeld.
+  Woraus `ha2` gebildet wird, lässt die Shelly-Doku offen („depends on the transport type") und
+  zeigt `dummy_method:dummy_uri` nur am WebSocket-Beispiel. Das Modul probiert deshalb beim ersten
+  authentifizierten Aufruf `dummy_method:dummy_uri` und `POST:/rpc` durch und merkt sich die
+  akzeptierte Variante; danach ist es wieder genau eine Anfrage.
 * Shelly Gen2+ abfragen: `POST http://<shelly>/rpc` mit `{"method":"Switch.GetStatus","params":{"id":0}}`

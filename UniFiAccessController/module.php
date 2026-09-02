@@ -1389,17 +1389,9 @@ class UniFiAccessController extends IPSModule
                 $error = 'Der Shelly verlangt eine Authentifizierung, es ist aber kein Passwort hinterlegt.';
                 return null;
             }
-            $auth = $this->BuildShellyAuth($authHeader, $user, $password, $error);
-            if ($auth === null) {
-                return null;
-            }
-            $request['auth'] = $auth;
-            $body = $this->HttpPostJson($url, (string) json_encode($request), $code, $error);
+
+            $body = $this->ShellyRpcAuthenticated($url, $request, $authHeader, $user, $password, $code, $error);
             if ($body === null) {
-                return null;
-            }
-            if ($code === 401) {
-                $error = 'Anmeldung am Shelly fehlgeschlagen. Bitte Benutzer und Passwort pruefen.';
                 return null;
             }
         }
@@ -1427,6 +1419,59 @@ class UniFiAccessController extends IPSModule
     }
 
     /**
+     * Wiederholt die Anfrage mit Digest-Authentifizierung.
+     *
+     * Die Shelly-Dokumentation laesst offen, woraus ha2 bei HTTP gebildet wird - sie
+     * sagt nur "depends on the transport type" und zeigt "dummy_method:dummy_uri" am
+     * WebSocket-Beispiel. Statt zu raten werden beide Varianten probiert; die
+     * funktionierende wird gemerkt, danach ist es wieder genau eine Anfrage.
+     */
+    private function ShellyRpcAuthenticated(string $url, array $request, string $authHeader, string $user, string $password, ?int &$code, ?string &$error): ?string
+    {
+        $variants  = ['dummy_method:dummy_uri', 'POST:/rpc'];
+        $remembered = $this->GetBuffer('ShellyHa2');
+        if ($remembered !== '' && in_array($remembered, $variants, true)) {
+            $variants = array_merge([$remembered], array_diff($variants, [$remembered]));
+        }
+
+        foreach ($variants as $index => $ha2Source) {
+            // Fuer jeden Versuch eine frische Challenge, ein verbrauchter nonce
+            // wuerde sonst faelschlich wie ein falsches Passwort aussehen
+            if ($index > 0) {
+                $fresh = '';
+                $this->HttpPostJson($url, (string) json_encode($request), $code, $error, $fresh);
+                if ($fresh === '') {
+                    break;
+                }
+                $authHeader = $fresh;
+            }
+
+            $auth = $this->BuildShellyAuth($authHeader, $user, $password, $ha2Source, $error);
+            if ($auth === null) {
+                return null;
+            }
+
+            $attempt = $request;
+            $attempt['auth'] = $auth;
+
+            $body = $this->HttpPostJson($url, (string) json_encode($attempt), $code, $error);
+            if ($body === null) {
+                return null;
+            }
+            if ($code !== 401) {
+                if ($remembered !== $ha2Source) {
+                    $this->SetBuffer('ShellyHa2', $ha2Source);
+                    $this->SendDebug('Shelly Auth', 'ha2 aus "' . $ha2Source . '" akzeptiert', 0);
+                }
+                return $body;
+            }
+        }
+
+        $error = 'Anmeldung am Shelly fehlgeschlagen. Bitte Benutzer und Passwort pruefen.';
+        return null;
+    }
+
+    /**
      * Digest-Authentifizierung nach Shelly-Gen2+-Schema (SHA-256).
      *
      * Die Challenge kommt bei HTTP ausschliesslich im WWW-Authenticate-Header,
@@ -1434,7 +1479,7 @@ class UniFiAccessController extends IPSModule
      *   WWW-Authenticate: Digest qop="auth", realm="shelly1g4-xxxx",
      *                     nonce="<base64>", algorithm=SHA-256
      */
-    private function BuildShellyAuth(string $challengeHeader, string $user, string $password, ?string &$error): ?array
+    private function BuildShellyAuth(string $challengeHeader, string $user, string $password, string $ha2Source, ?string &$error): ?array
     {
         $realm = '';
         $nonce = '';
@@ -1457,10 +1502,8 @@ class UniFiAccessController extends IPSModule
         $nc     = '00000001';
         $cnonce = random_int(100000000, 999999999);
 
-        // ha2 ist bei HTTP fest "POST:/rpc" - das dokumentierte
-        // "dummy_method:dummy_uri" gilt nur fuer RPC ueber WebSocket.
         $ha1 = hash('sha256', $user . ':' . $realm . ':' . $password);
-        $ha2 = hash('sha256', 'POST:/rpc');
+        $ha2 = hash('sha256', $ha2Source);
         $response = hash('sha256', implode(':', [$ha1, $nonce, $nc, (string) $cnonce, 'auth', $ha2]));
 
         return [
