@@ -1372,8 +1372,9 @@ class UniFiAccessController extends IPSModule
 
         $this->SendDebug('Shelly Request', $url . ' ' . json_encode($request), 0);
 
-        $code = 0;
-        $body = $this->HttpPostJson($url, (string) json_encode($request), $code, $error);
+        $code       = 0;
+        $authHeader = '';
+        $body = $this->HttpPostJson($url, (string) json_encode($request), $code, $error, $authHeader);
         if ($body === null) {
             return null;
         }
@@ -1388,13 +1389,17 @@ class UniFiAccessController extends IPSModule
                 $error = 'Der Shelly verlangt eine Authentifizierung, es ist aber kein Passwort hinterlegt.';
                 return null;
             }
-            $auth = $this->BuildShellyAuth($body, $user, $password, $error);
+            $auth = $this->BuildShellyAuth($authHeader, $user, $password, $error);
             if ($auth === null) {
                 return null;
             }
             $request['auth'] = $auth;
             $body = $this->HttpPostJson($url, (string) json_encode($request), $code, $error);
             if ($body === null) {
+                return null;
+            }
+            if ($code === 401) {
+                $error = 'Anmeldung am Shelly fehlgeschlagen. Bitte Benutzer und Passwort pruefen.';
                 return null;
             }
         }
@@ -1423,41 +1428,58 @@ class UniFiAccessController extends IPSModule
 
     /**
      * Digest-Authentifizierung nach Shelly-Gen2+-Schema (SHA-256).
+     *
+     * Die Challenge kommt bei HTTP ausschliesslich im WWW-Authenticate-Header,
+     * der Antwortkoerper der 401 ist leer:
+     *   WWW-Authenticate: Digest qop="auth", realm="shelly1g4-xxxx",
+     *                     nonce="<base64>", algorithm=SHA-256
      */
-    private function BuildShellyAuth(string $challengeBody, string $user, string $password, ?string &$error): ?array
+    private function BuildShellyAuth(string $challengeHeader, string $user, string $password, ?string &$error): ?array
     {
-        $json = json_decode($challengeBody, true);
-        $message = (is_array($json) && is_array($json['error'] ?? null)) ? ($json['error']['message'] ?? '') : '';
-        $challenge = is_array($message) ? $message : json_decode((string) $message, true);
+        $realm = '';
+        $nonce = '';
 
-        if (!is_array($challenge) || !isset($challenge['nonce'], $challenge['realm'])) {
-            $error = 'Die Digest-Anforderung des Shelly konnte nicht gelesen werden: ' . substr($challengeBody, 0, 200);
+        if (preg_match('/realm="([^"]*)"/i', $challengeHeader, $match)) {
+            $realm = $match[1];
+        }
+        if (preg_match('/nonce="([^"]*)"/i', $challengeHeader, $match)) {
+            $nonce = $match[1];
+        }
+
+        if ($realm === '' || $nonce === '') {
+            $error = 'Die Digest-Anforderung des Shelly konnte nicht gelesen werden: '
+                . ($challengeHeader !== '' ? $challengeHeader : 'kein WWW-Authenticate-Header erhalten');
             return null;
         }
 
-        $realm  = (string) $challenge['realm'];
-        $nonce  = (int) $challenge['nonce'];
-        $nc     = (int) ($challenge['nc'] ?? 1);
+        // nc ist ein 8-stelliger Hex-Zaehler, cnonce eine Zufallszahl des Clients.
+        // Fuer jede Anfrage wird eine frische Challenge geholt, daher bleibt nc bei 1.
+        $nc     = '00000001';
         $cnonce = random_int(100000000, 999999999);
 
+        // ha2 ist bei HTTP fest "POST:/rpc" - das dokumentierte
+        // "dummy_method:dummy_uri" gilt nur fuer RPC ueber WebSocket.
         $ha1 = hash('sha256', $user . ':' . $realm . ':' . $password);
-        $ha2 = hash('sha256', 'dummy_method:dummy_uri');
-        $response = hash('sha256', implode(':', [$ha1, (string) $nonce, (string) $nc, (string) $cnonce, 'auth', $ha2]));
+        $ha2 = hash('sha256', 'POST:/rpc');
+        $response = hash('sha256', implode(':', [$ha1, $nonce, $nc, (string) $cnonce, 'auth', $ha2]));
 
         return [
             'realm'     => $realm,
             'username'  => $user,
+            // Der nonce ist Base64 und darf nicht in eine Zahl gewandelt werden
             'nonce'     => $nonce,
             'cnonce'    => $cnonce,
+            'nc'        => $nc,
             'response'  => $response,
             'algorithm' => 'SHA-256'
         ];
     }
 
-    private function HttpPostJson(string $url, string $body, ?int &$httpCode, ?string &$error): ?string
+    private function HttpPostJson(string $url, string $body, ?int &$httpCode, ?string &$error, ?string &$authHeader = null): ?string
     {
-        $httpCode = 0;
-        $error    = '';
+        $httpCode   = 0;
+        $error      = '';
+        $authHeader = '';
 
         $ch = curl_init($url);
         if ($ch === false) {
@@ -1465,13 +1487,21 @@ class UniFiAccessController extends IPSModule
             return null;
         }
 
+        // Bei einer 401 steckt die Digest-Challenge nur im Header, nicht im Body
+        $captured = '';
         curl_setopt_array($ch, [
             CURLOPT_POST              => true,
             CURLOPT_POSTFIELDS        => $body,
             CURLOPT_RETURNTRANSFER    => true,
             CURLOPT_CONNECTTIMEOUT_MS => 3000,
             CURLOPT_TIMEOUT_MS        => 5000,
-            CURLOPT_HTTPHEADER        => ['Content-Type: application/json']
+            CURLOPT_HTTPHEADER        => ['Content-Type: application/json'],
+            CURLOPT_HEADERFUNCTION    => function ($curl, $line) use (&$captured) {
+                if (stripos($line, 'WWW-Authenticate:') === 0) {
+                    $captured = trim(substr($line, strlen('WWW-Authenticate:')));
+                }
+                return strlen($line);
+            }
         ]);
 
         $response = curl_exec($ch);
@@ -1480,7 +1510,8 @@ class UniFiAccessController extends IPSModule
             curl_close($ch);
             return null;
         }
-        $httpCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $httpCode   = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $authHeader = $captured;
         curl_close($ch);
 
         return (string) $response;

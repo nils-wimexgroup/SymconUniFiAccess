@@ -40,7 +40,7 @@ Türliste eingetragen (siehe unten). Hier stehen nur die Einstellungen, die für
 | Feld | Bedeutung |
 |---|---|
 | Relais-Kanal | Beim Shelly 1 Gen4 immer `0` |
-| Benutzer / Passwort | Nur nötig, wenn im Shelly die Authentifizierung aktiv ist (Digest SHA-256) |
+| Benutzer / Passwort | Nur nötig, wenn im Shelly die Authentifizierung aktiv ist. Benutzer ist bei Gen2+ immer `admin` |
 | Maximale Sirenenlauffzeit | Nach dieser Zeit schaltet die Sirene ab; sie geht erst wieder an, wenn die Tür zwischenzeitlich geschlossen war. `0` = unbegrenzt |
 | Shelly-Zustand abfragen alle | Intervall der Rückfrage des tatsächlichen Relaiszustands, `0` = keine zyklische Abfrage |
 
@@ -216,4 +216,9 @@ UAC_GetTileData(int $InstanceID);           // aktueller Türzustand als JSON (n
 * UniFi Access: `GET https://<controller>:12445/api/v1/developer/doors`
   mit Header `Authorization: Bearer <token>`
 * Shelly Gen2+ schalten: `POST http://<shelly>/rpc` mit `{"method":"Switch.Set","params":{"id":0,"on":true,"toggle_after":300}}`
+* Shelly-Authentifizierung: Digest SHA-256. Die Challenge liefert der Shelly bei HTTP
+  ausschließlich im `WWW-Authenticate`-Header (der Body der 401 ist leer). `ha2` ist dabei fest
+  `SHA256("POST:/rpc")` – das in der Shelly-Doku genannte `dummy_method:dummy_uri` gilt nur für
+  RPC über WebSocket. Der `nonce` ist Base64 und darf nicht in eine Zahl gewandelt werden, `nc`
+  ist Pflichtfeld.
 * Shelly Gen2+ abfragen: `POST http://<shelly>/rpc` mit `{"method":"Switch.GetStatus","params":{"id":0}}`
