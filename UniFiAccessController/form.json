@@ -70,7 +70,7 @@
             "items": [
                 {
                     "type": "Label",
-                    "caption": "Die Sirene wird pro Tür in der Türliste weiter unten eingetragen (IP-Adresse und Bezeichnung). Hier stehen nur die Einstellungen, die für alle Shellys gelten."
+                    "caption": "Die Sirenen werden über MQTT geschaltet. Diese Instanz muss dafür an einem MQTT-Gateway hängen (MQTT Server oder MQTT Client) – siehe „Gateway ändern\" oben. Das MQTT-Topic wird pro Tür in der Türliste weiter unten eingetragen."
                 },
                 {
                     "type": "NumberSpinner",
@@ -82,15 +82,13 @@
                 },
                 {
                     "type": "ValidationTextBox",
-                    "name": "ShellyUser",
-                    "caption": "Benutzer (Gen2+ immer admin)",
-                    "width": "200px"
+                    "name": "ReplyTopic",
+                    "caption": "Antwort-Topic dieser Instanz",
+                    "width": "300px"
                 },
                 {
-                    "type": "PasswordTextBox",
-                    "name": "ShellyPassword",
-                    "caption": "Passwort (leer = keine Authentifizierung)",
-                    "width": "300px"
+                    "type": "Label",
+                    "caption": "Wird als \"src\" mitgesendet; der Shelly schickt seine Antworten dann auf <Antwort-Topic>/rpc. Nur ändern, wenn mehrere Symcon-Instanzen denselben Broker nutzen."
                 },
                 {
                     "type": "NumberSpinner",
@@ -106,21 +104,12 @@
                     "caption": "0 = unbegrenzt. Sonst schaltet die Sirene nach dieser Zeit ab und geht erst wieder an, wenn die Tür zwischenzeitlich geschlossen war."
                 },
                 {
-                    "type": "NumberSpinner",
-                    "name": "SirenCheckInterval",
-                    "caption": "Shelly-Zustand abfragen alle",
-                    "suffix": "Sekunden",
-                    "minimum": 0,
-                    "maximum": 3600,
-                    "width": "250px"
-                },
-                {
                     "type": "Label",
-                    "caption": "Fragt den tatsächlichen Relaiszustand aller eingetragenen Shellys ab und vergleicht ihn mit dem Sollwert. Unabhängig davon wird direkt nach jedem Schaltvorgang nachgefragt. 0 = keine zyklische Abfrage."
+                    "caption": "Ein zyklisches Abfragen ist nicht mehr nötig: der Shelly meldet jede Relaisänderung von selbst auf <Topic>/status/switch:0 und seinen Online-Zustand auf <Topic>/online."
                 },
                 {
                     "type": "Button",
-                    "caption": "Shellys abfragen",
+                    "caption": "Statusmeldung anfordern",
                     "onClick": "UAC_ShowSirenStatus($id);"
                 },
                 {
@@ -148,7 +137,7 @@
                         "DoorName": "",
                         "AlarmEnabled": false,
                         "OpenDelay": 60,
-                        "ShellyHost": "",
+                        "ShellyTopic": "",
                         "ShellyName": ""
                     },
                     "delete": true,
@@ -193,8 +182,8 @@
                             }
                         },
                         {
-                            "caption": "Shelly IP-Adresse",
-                            "name": "ShellyHost",
+                            "caption": "MQTT-Topic des Shelly",
+                            "name": "ShellyTopic",
                             "width": "180px",
                             "add": "",
                             "edit": {
