@@ -1,15 +1,20 @@
 # UniFi Access Controller
 
 IP-Symcon-Modul, das einen UniFi Access Controller über die Developer-API abfragt, alle Türen
-im Objektbaum abbildet und pro Tür eine Sirene (Shelly 1 Gen4) auslösen kann, wenn die Tür
-länger als eine einstellbare Zeit offen steht.
+im Objektbaum abbildet und pro Tür eine Sirene auslösen kann, wenn die Tür länger als eine
+einstellbare Zeit offen steht.
+
+Geschaltet wird die Sirene über eine **schaltbare Variable einer anderen Instanz** – typischerweise
+das Relais eines Shelly 1 Gen4. Wie dieser Shelly angebunden ist (MQTT, HTTP, welches Modul auch
+immer), ist für dieses Modul unerheblich: es kennt nur die Variable.
 
 ## Voraussetzungen
 
 * IP-Symcon 7.1 oder neuer (wegen der eigenen Visualisierungs-Kachel / HTML-SDK)
 * UniFi Access mit aktivierter Developer-API (Port 12445)
 * API-Token aus UniFi Access: **Einstellungen → Allgemein → Erweitert → API-Token**
-* Optional: Shelly 1 Gen4 (oder ein anderer Shelly der Gen2+ Reihe) als Sirenenschalter
+* Optional pro Tür: eine Instanz mit schaltbarer Boolean-Variable als Sirenenschalter
+  (z. B. Shelly 1 Gen4 als MQTT- oder HTTP-Instanz)
 
 ## Installation
 
@@ -32,20 +37,23 @@ länger als eine einstellbare Zeit offen steht.
 | Timeout | Timeout der HTTP-Anfrage in Millisekunden |
 | TLS-Zertifikat prüfen | Aus lassen, solange der Controller ein selbstsigniertes Zertifikat nutzt |
 
-### Sirene (Shelly 1 Gen4)
+### Sirene
 
-Jede Tür hat ihren eigenen Shelly. IP-Adresse und Bezeichnung werden deshalb pro Tür in der
-Türliste eingetragen (siehe unten). Hier stehen nur die Einstellungen, die für alle Shellys gelten:
+Jede Tür hat ihren eigenen Shelly und damit ihre eigene Relais-Variable. Die wird deshalb pro Tür
+in der Türliste ausgewählt (siehe unten). Hier steht nur, was für alle Sirenen gilt:
 
 | Feld | Bedeutung |
 |---|---|
-| Relais-Kanal | Beim Shelly 1 Gen4 immer `0` |
-| Benutzer / Passwort | Nur nötig, wenn im Shelly die Authentifizierung aktiv ist. Benutzer ist bei Gen2+ immer `admin` |
-| Maximale Sirenenlauffzeit | Nach dieser Zeit schaltet die Sirene ab; sie geht erst wieder an, wenn die Tür zwischenzeitlich geschlossen war. `0` = unbegrenzt |
-| Shelly-Zustand abfragen alle | Intervall der Rückfrage des tatsächlichen Relaiszustands, `0` = keine zyklische Abfrage |
+| Maximale Sirenenlaufzeit | Nach dieser Zeit schaltet die Sirene ab; sie geht erst wieder an, wenn die Tür zwischenzeitlich geschlossen war. `0` = unbegrenzt |
 
-Der Wert wird zusätzlich als `toggle_after` an den Shelly übergeben, damit die Sirene auch dann
-abschaltet, wenn IP-Symcon in der Zwischenzeit ausfällt.
+Ein zyklisches Abfragen der Shellys ist nicht nötig: das Modul meldet sich per `VM_UPDATE` für
+Änderungen der Relais-Variablen an und übernimmt jeden Zustandswechsel sofort – egal wer ihn
+ausgelöst hat.
+
+> **Hinweis zum Ausfall von IP-Symcon:** Die frühere HTTP-Anbindung hat die maximale Laufzeit
+> zusätzlich als `toggle_after` im Shelly hinterlegt, so dass die Sirene auch bei einem Ausfall von
+> IP-Symcon abschaltete. Über eine generische Variable ist das nicht möglich. Wer diese Absicherung
+> braucht, richtet sie im Shelly selbst ein (z. B. Auto-Off in der Switch-Konfiguration).
 
 ### Türen / Sirenenalarm
 
@@ -58,14 +66,18 @@ abschaltet, wenn IP-Symcon in der Zwischenzeit ausfällt.
 | Name | Nur zur Orientierung |
 | Alarm | Sirenenalarm für diese Tür aktivieren |
 | Offen länger als | Verzögerung in Sekunden, bis die Sirene auslöst |
-| Shelly IP-Adresse | Shelly, der die Sirene dieser Tür schaltet – ohne Adresse gibt es keinen Alarm |
+| Relais-Variable der Sirene | Schaltbare Boolean-Variable, die die Sirene dieser Tür schaltet – ohne Variable gibt es keinen Alarm |
 | Bezeichnung der Sirene | Klartextname, z. B. „Sirene Lagerhalle" |
 
-Die Bezeichnung wird überall anstelle der IP-Adresse verwendet: im Objektbaum, in der Kachel und in
-den Logmeldungen. Ohne Bezeichnung erscheint die IP.
+Die Variable muss vom Typ Boolean sein und eine Aktion hinterlegt haben (`VariableAction` bzw.
+`VariableCustomAction`) – sonst lehnt das Modul sie mit einer Fehlermeldung ab. Geschaltet wird über
+`RequestAction`, also über genau denselben Weg wie ein Klick im Objektbaum.
 
-Mehrere Türen dürfen sich eine Sirene teilen – dann genügt es, die Bezeichnung in einer der Zeilen
-einzutragen. Abgeschaltet wird erst, wenn keine der beteiligten Türen mehr im Alarmzustand ist.
+Bleibt die Bezeichnung leer, nimmt das Modul den Namen der Instanz, zu der die Variable gehört, und
+notfalls den Namen der Variablen selbst.
+
+Mehrere Türen dürfen sich eine Sirene teilen – dieselbe Variable in mehreren Zeilen genügt.
+Abgeschaltet wird erst, wenn keine der beteiligten Türen mehr im Alarmzustand ist.
 
 ## Objektbaum
 
@@ -134,38 +146,36 @@ Der Verlauf liegt in einem Attribut der Instanz und übersteht einen Neustart. F
 und IPS-Diagramme zusätzlich die Option **„Tür offen" und „Sirenenalarm" im Archiv protokollieren**
 aktivieren – das Modul setzt das Logging dann selbst.
 
-## Shelly-Rückfrage (hat die Sirene wirklich geschaltet?)
+## Sirenenzustand (hat die Sirene wirklich geschaltet?)
 
-Ein abgesetzter Schaltbefehl heißt nicht, dass der Shelly ihn auch ausgeführt hat. Das Modul fragt
-deshalb per `Switch.GetStatus` den tatsächlichen Relaiszustand ab und vergleicht ihn mit dem Sollwert:
+Ein abgesetzter Schaltbefehl heißt nicht, dass die Sirene auch wirklich läuft. Das Modul vergleicht
+deshalb laufend seinen Sollwert mit dem Istwert der Relais-Variablen:
 
-* **direkt nach jedem Schaltvorgang** – genau dann ist die Frage interessant
-* **zyklisch** im eingestellten Intervall (Standard 60 s)
-* **auf Knopfdruck** über „Shellys abfragen" im Formular oder „Sirenen prüfen" in der Kachel
+* **Istwert** ist der aktuelle Wert der Variablen (`GetValue`)
+* **Erreichbarkeit** ergibt sich aus dem Status der Instanz, zu der die Variable gehört
+  (aktiv = Status 102) – ein Shelly, der sich per MQTT abgemeldet hat, fällt damit sofort auf
+* aktualisiert wird bei jeder Änderung der Variablen (`VM_UPDATE`), nach jedem eigenen
+  Schaltvorgang und auf Knopfdruck über „Ist-Zustand anzeigen" im Formular
 
-Die Abfrage läuft in einem eigenen Timer. Ein nicht erreichbarer Shelly bremst dadurch die
-Türabfrage nicht aus, auch wenn er ins Timeout läuft.
-
-Im Objektbaum entsteht eine Kategorie **Sirenen** mit je einem Unterordner pro Shelly, benannt nach
+Im Objektbaum entsteht eine Kategorie **Sirenen** mit je einem Unterordner pro Sirene, benannt nach
 der eingetragenen Bezeichnung:
 
 | Variable | Bedeutung |
 |---|---|
-| Erreichbar | ob der Shelly geantwortet hat |
-| Relais (Ist) | tatsächlicher Zustand laut Shelly |
+| Erreichbar | ob die Instanz hinter der Variablen aktiv ist |
+| Relais (Ist) | aktueller Wert der Relais-Variablen |
 | Relais (Soll) | was das Modul geschaltet haben will |
 | Abweichung | Ist ≠ Soll – der Schaltbefehl ist nicht angekommen |
-| Antwortzeit | Dauer der letzten Abfrage in ms |
-| Letzte Prüfung | Zeitpunkt |
-| Letzter Fehler | Fehlertext, wenn der Shelly nicht antwortet |
+| Letzte Meldung | Zeitpunkt der letzten Zustandsänderung |
+| Letzter Fehler | Fehlertext, wenn das Schalten fehlgeschlagen ist |
 
 In der Kachel steht das Ganze als Abschnitt „Sirenen" unter der Türliste, mit Bezeichnung als
-Überschrift und IP-Adresse darunter. Nicht erreichbare Shellys und Abweichungen sind rot
+Überschrift und der Variablen-ID darunter. Nicht erreichbare Sirenen und Abweichungen sind rot
 hinterlegt, zusätzlich landet beides als Warnung im IPS-Meldungslog. Je Sirene gibt es dort auch
 die Schaltflächen **EIN** und **AUS**, um sie einzeln zu testen.
 
-Abgefragt wird jede in der Türliste eingetragene Adresse, jede genau einmal – auch wenn sich
-mehrere Türen einen Shelly teilen.
+Verwaltet wird jede in der Türliste eingetragene Variable, jede genau einmal – auch wenn sich
+mehrere Türen eine Sirene teilen.
 
 ## Wartungsmodus (Sirene je Tür abschalten)
 
@@ -201,8 +211,8 @@ UAC_CheckAlarms(int $InstanceID);           // Alarmlogik neu auswerten
 UAC_TestConnection(int $InstanceID);        // Verbindungstest mit Türliste
 UAC_LoadDoors(int $InstanceID);             // Türen in die Konfigurationsliste laden
 UAC_CleanupDoors(int $InstanceID);          // verwaiste Türen aus dem Objektbaum entfernen
-UAC_TestSiren(int $InstanceID, string $Host, bool $On);  // einzelne Sirene testweise schalten
-UAC_CheckSirens(int $InstanceID);           // Ist-Zustand aller Shellys abfragen
+UAC_TestSiren(int $InstanceID, int $VariableID, bool $On);  // einzelne Sirene testweise schalten
+UAC_CheckSirens(int $InstanceID);           // Ist-Zustand aller Sirenen einlesen
 UAC_ShowSirenStatus(int $InstanceID);       // dito, mit Textausgabe
 
 UAC_SetSirenEnabled(int $InstanceID, string $DoorID, bool $Enabled);  // Wartungsmodus je Tür
@@ -215,12 +225,7 @@ UAC_GetTileData(int $InstanceID);           // aktueller Türzustand als JSON (n
 
 * UniFi Access: `GET https://<controller>:12445/api/v1/developer/doors`
   mit Header `Authorization: Bearer <token>`
-* Shelly Gen2+ schalten: `POST http://<shelly>/rpc` mit `{"method":"Switch.Set","params":{"id":0,"on":true,"toggle_after":300}}`
-* Shelly-Authentifizierung: Digest SHA-256. Die Challenge liefert der Shelly bei HTTP
-  ausschließlich im `WWW-Authenticate`-Header, der Body der 401 ist leer. Der `nonce` ist Base64
-  und darf nicht in eine Zahl gewandelt werden, `nc` ist Pflichtfeld.
-  Woraus `ha2` gebildet wird, lässt die Shelly-Doku offen („depends on the transport type") und
-  zeigt `dummy_method:dummy_uri` nur am WebSocket-Beispiel. Das Modul probiert deshalb beim ersten
-  authentifizierten Aufruf `dummy_method:dummy_uri` und `POST:/rpc` durch und merkt sich die
-  akzeptierte Variante; danach ist es wieder genau eine Anfrage.
-* Shelly Gen2+ abfragen: `POST http://<shelly>/rpc` mit `{"method":"Switch.GetStatus","params":{"id":0}}`
+* Sirene schalten: `RequestAction(<Relais-Variable>, true|false)` – die eigentliche Kommunikation
+  mit dem Gerät macht das Modul, dem die Variable gehört
+* Sirenenzustand lesen: `GetValue(<Relais-Variable>)` und
+  `IPS_GetInstance(<Instanz der Variablen>)['InstanceStatus']`

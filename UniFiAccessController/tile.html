@@ -116,8 +116,8 @@ function uacCheckSirens() {
     requestAction('CheckSirens', true);
 }
 
-function uacTestSiren(topic, on) {
-    requestAction('TestSiren', JSON.stringify({ topic: topic, on: on }));
+function uacTestSiren(variable, on) {
+    requestAction('TestSiren', JSON.stringify({ variable: variable, on: on }));
 }
 
 /* ---------- Hilfsfunktionen ---------- */
@@ -188,7 +188,7 @@ function uacSignature(data) {
         parts.push([event.name, event.start, event.end, event.siren ? 1 : 0].join(','));
     });
     (data.sirens || []).forEach(function (siren) {
-        parts.push([siren.topic, siren.name, siren.channel, siren.checked, siren.reachable,
+        parts.push([siren.variable, siren.name, siren.checked, siren.reachable,
             siren.output, siren.target, siren.mismatch, siren.ts, siren.error].join(','));
     });
     return parts.join('|');
@@ -314,20 +314,20 @@ function uacRenderSirens(data) {
             compare = '<span class="uac-badge alarm">Soll: ' + (siren.target ? 'EIN' : 'AUS') + '</span>';
         }
 
-        var meta = uacEsc(siren.topic);
+        var meta = 'Variable #' + siren.variable;
         if (siren.checked) {
             meta += (siren.reachable && !siren.error)
                 ? ' &middot; ' + uacTime(siren.ts)
                 : ' &middot; ' + uacEsc(siren.error);
         }
 
-        var test = '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.topic) +
+        var test = '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.variable) +
             '\', true)">EIN</button> ' +
-            '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.topic) +
+            '<button class="uac-btn" onclick="uacTestSiren(\'' + uacEsc(siren.variable) +
             '\', false)">AUS</button>';
 
         html += '<div class="uac-row' + rowClass + '">' +
-            '<div class="uac-name">' + uacEsc(siren.name || siren.topic) +
+            '<div class="uac-name">' + uacEsc(siren.name || ('Variable #' + siren.variable)) +
             '<div class="uac-sub">' + meta + '</div></div>' +
             state + compare + '<div class="uac-spacer"></div>' + test +
             '</div>';

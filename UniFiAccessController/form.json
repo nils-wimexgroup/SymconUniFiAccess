@@ -70,25 +70,7 @@
             "items": [
                 {
                     "type": "Label",
-                    "caption": "Die Sirenen werden über MQTT geschaltet. Diese Instanz muss dafür an einem MQTT-Gateway hängen (MQTT Server oder MQTT Client) – siehe „Gateway ändern\" oben. Das MQTT-Topic wird pro Tür in der Türliste weiter unten eingetragen."
-                },
-                {
-                    "type": "NumberSpinner",
-                    "name": "ShellyChannel",
-                    "caption": "Relais-Kanal (beim Shelly 1 Gen4 immer 0)",
-                    "minimum": 0,
-                    "maximum": 3,
-                    "width": "300px"
-                },
-                {
-                    "type": "ValidationTextBox",
-                    "name": "ReplyTopic",
-                    "caption": "Antwort-Topic dieser Instanz",
-                    "width": "300px"
-                },
-                {
-                    "type": "Label",
-                    "caption": "Wird als \"src\" mitgesendet; der Shelly schickt seine Antworten dann auf <Antwort-Topic>/rpc. Nur ändern, wenn mehrere Symcon-Instanzen denselben Broker nutzen."
+                    "caption": "Jeder Shelly ist eine eigene Instanz im Objektbaum. In der Türliste weiter unten wird pro Tür die schaltbare Relais-Variable dieser Instanz ausgewählt. Wie der Shelly angebunden ist – MQTT, HTTP, welches Modul auch immer – spielt für dieses Modul keine Rolle."
                 },
                 {
                     "type": "NumberSpinner",
@@ -105,11 +87,11 @@
                 },
                 {
                     "type": "Label",
-                    "caption": "Ein zyklisches Abfragen ist nicht mehr nötig: der Shelly meldet jede Relaisänderung von selbst auf <Topic>/status/switch:0 und seinen Online-Zustand auf <Topic>/online."
+                    "caption": "Ein zyklisches Abfragen ist nicht nötig: das Modul meldet sich für Änderungen der Relais-Variablen an und übernimmt den Ist-Zustand sofort. Die Erreichbarkeit ergibt sich aus dem Status der Shelly-Instanz."
                 },
                 {
                     "type": "Button",
-                    "caption": "Statusmeldung anfordern",
+                    "caption": "Ist-Zustand anzeigen",
                     "onClick": "UAC_ShowSirenStatus($id);"
                 },
                 {
@@ -137,7 +119,7 @@
                         "DoorName": "",
                         "AlarmEnabled": false,
                         "OpenDelay": 60,
-                        "ShellyTopic": "",
+                        "SirenVariable": 0,
                         "ShellyName": ""
                     },
                     "delete": true,
@@ -182,12 +164,12 @@
                             }
                         },
                         {
-                            "caption": "MQTT-Topic des Shelly",
-                            "name": "ShellyTopic",
-                            "width": "180px",
-                            "add": "",
+                            "caption": "Relais-Variable der Sirene",
+                            "name": "SirenVariable",
+                            "width": "260px",
+                            "add": 0,
                             "edit": {
-                                "type": "ValidationTextBox"
+                                "type": "SelectVariable"
                             }
                         },
                         {

@@ -26,9 +26,6 @@ class UniFiAccessController extends IPSModule
 
     private const FLOORPLAN_MODULE_ID = '{D282D828-200B-41CE-BA29-960F1DAB54F5}';
 
-    // DataID fuer SendDataToParent an ein MQTT-Gateway (Server oder Client)
-    private const MQTT_TX_DATAID = '{043EA491-0325-4ADD-8FC2-A30C8EEB4D3F}';
-
     private const DOOR_PREFIX         = 'Door_';
     private const SIREN_PREFIX        = 'Siren_';
     private const SIREN_SWITCH_PREFIX = 'SirenEnabled_';
@@ -51,8 +48,6 @@ class UniFiAccessController extends IPSModule
         $this->RegisterPropertyBoolean('VerifyTLS', false);
 
         // --- Sirene / Shelly ---
-        $this->RegisterPropertyInteger('ShellyChannel', 0);
-        $this->RegisterPropertyString('ReplyTopic', 'symcon-unifiaccess');
         $this->RegisterPropertyInteger('SirenMaxRuntime', 300);
 
         // --- Tueren ---
@@ -67,12 +62,14 @@ class UniFiAccessController extends IPSModule
         // --- interner Zustand ---
         // DoorState: { "<doorId>": {"ident":..,"name":..,"open":bool,"sensor":bool,"since":ts,"alarm":bool,"bypassSince":ts} }
         $this->RegisterAttributeString('DoorState', '{}');
-        // SirenState: { "<host>|<channel>": {"on":bool,"since":ts,"muted":bool} } - Soll-Zustand
+        // SirenState: { "<variablenID>": {"on":bool,"since":ts,"muted":bool} } - Soll-Zustand
         $this->RegisterAttributeString('SirenState', '{}');
-        // SirenStatus: { "<host>|<channel>": {"reachable":bool,"output":bool|null,"ms":float,"ts":int,"error":string} } - Ist-Zustand
+        // SirenStatus: { "<variablenID>": {"reachable":bool,"output":bool|null,"ts":int,"error":string} } - Ist-Zustand
         $this->RegisterAttributeString('SirenStatus', '{}');
         // EventLog: [ {"door":..,"name":..,"start":ts,"end":ts|0,"siren":bool}, ... ] neueste zuerst
         $this->RegisterAttributeString('EventLog', '[]');
+        // WatchedVariables: [ VariablenIDs ] - fuer die RegisterMessage aktiv ist
+        $this->RegisterAttributeString('WatchedVariables', '[]');
 
         // Eigene Kachel in der Visualisierung (HTML-SDK)
         $this->SetVisualizationType(1);
@@ -116,7 +113,7 @@ class UniFiAccessController extends IPSModule
 
         $this->SetStatus(self::STATUS_ACTIVE);
 
-        $this->ApplyReceiveFilter();
+        $this->WatchSirenVariables();
 
         // Erste Abfrage kurz nach dem Speichern, damit die Konfigurationsmaske nicht blockiert.
         // Poll() setzt den Timer danach auf das konfigurierte Intervall.
@@ -124,113 +121,49 @@ class UniFiAccessController extends IPSModule
     }
 
     /**
-     * Beschraenkt den MQTT-Empfang auf die Topics der eingetragenen Shellys und
-     * auf das Antwort-Topic dieser Instanz. Ohne Filter bekaeme das Modul den
-     * kompletten Broker-Verkehr.
+     * Meldet sich fuer Aenderungen der Sirenen-Variablen an. Damit reagiert das
+     * Modul sofort, wenn eine Sirene von aussen geschaltet wird oder das
+     * Shelly-Modul einen neuen Relaiszustand meldet - ohne eigenes Polling.
      */
-    private function ApplyReceiveFilter(): void
+    private function WatchSirenVariables(): void
     {
-        $prefixes = [];
+        $wanted = [];
         foreach ($this->GetConfiguredSirens() as $siren) {
-            $prefixes[] = preg_quote($siren['topic'], '/');
-        }
-        $reply = $this->ReplyTopic();
-        if ($reply !== '') {
-            $prefixes[] = preg_quote($reply, '/');
-        }
-
-        if (count($prefixes) === 0) {
-            // Nichts konfiguriert: alles verwerfen, statt alles zu empfangen
-            $this->SetReceiveDataFilter('(?!)');
-            return;
-        }
-
-        $this->SetReceiveDataFilter('.*(' . implode('|', array_unique($prefixes)) . ').*');
-    }
-
-    private function ReplyTopic(): string
-    {
-        return trim($this->ReadPropertyString('ReplyTopic'), " \t\n\r/");
-    }
-
-    /* ===================================================================== */
-    /* MQTT-Empfang                                                          */
-    /* ===================================================================== */
-
-    public function ReceiveData($JSONString)
-    {
-        $data = json_decode((string) $JSONString, true);
-        if (!is_array($data)) {
-            return '';
-        }
-
-        $topic   = (string) ($data['Topic'] ?? '');
-        $payload = (string) ($data['Payload'] ?? '');
-        if ($topic === '') {
-            return '';
-        }
-
-        $this->SendDebug('MQTT <', $topic . ' = ' . substr($payload, 0, 300), 0);
-
-        $status  = $this->ReadSirenStatus();
-        $sirens  = $this->GetConfiguredSirens();
-        $channel = $this->ReadPropertyInteger('ShellyChannel');
-        $touched = false;
-
-        foreach ($sirens as $key => $siren) {
-            $prefix = $siren['topic'];
-            if ($prefix === '') {
-                continue;
+            if ($siren['variable'] > 0) {
+                $wanted[] = $siren['variable'];
             }
+        }
+        $wanted = array_values(array_unique($wanted));
 
-            // <prefix>/online: true/false, false kommt als Last Will vom Broker
-            if ($topic === $prefix . '/online') {
-                $status[$key]['reachable'] = (trim(strtolower($payload)) === 'true');
-                $status[$key]['ts']        = time();
-                $status[$key]['error']     = $status[$key]['reachable'] ? '' : 'Shelly ist offline (Last Will)';
-                $touched = true;
-                continue;
+        $registered = json_decode($this->ReadAttributeString('WatchedVariables'), true);
+        if (!is_array($registered)) {
+            $registered = [];
+        }
+
+        foreach ($registered as $varID) {
+            if (!in_array((int) $varID, $wanted, true)) {
+                $this->UnregisterMessage((int) $varID, VM_UPDATE);
             }
-
-            // <prefix>/status/switch:N: Relaiszustand als Push
-            if ($topic === $prefix . '/status/switch:' . $channel) {
-                $state = json_decode($payload, true);
-                if (is_array($state) && array_key_exists('output', $state)) {
-                    $status[$key]['reachable'] = true;
-                    $status[$key]['output']    = (bool) $state['output'];
-                    $status[$key]['ts']        = time();
-                    $status[$key]['error']     = '';
-                    $touched = true;
-                }
-                continue;
+        }
+        foreach ($wanted as $varID) {
+            if (!in_array($varID, array_map('intval', $registered), true)) {
+                $this->RegisterMessage($varID, VM_UPDATE);
             }
         }
 
-        // Antworten auf eigene RPC-Aufrufe: <ReplyTopic>/rpc
-        $reply = $this->ReplyTopic();
-        if ($reply !== '' && $topic === $reply . '/rpc') {
-            $answer = json_decode($payload, true);
-            if (is_array($answer) && isset($answer['error'])) {
-                $detail = is_array($answer['error'])
-                    ? (($answer['error']['code'] ?? '?') . ': ' . ($answer['error']['message'] ?? ''))
-                    : (string) json_encode($answer['error']);
-                $this->LogMessage('Shelly hat einen Befehl abgelehnt: ' . $detail, KL_ERROR);
-            }
-        }
-
-        if ($touched) {
-            $this->WriteSirenStatus($status);
-            $this->UpdateSirenTree($sirens, $status);
-            $this->EvaluateAlarms();
-        }
-
-        return '';
+        $this->WriteAttributeString('WatchedVariables', (string) json_encode($wanted));
     }
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
     {
         if ($Message == IPS_KERNELMESSAGE && $Data[0] == KR_READY) {
             $this->ApplyChanges();
+            return;
+        }
+
+        // Eine Sirenen-Variable hat sich geaendert: Ist-Zustand uebernehmen
+        if ($Message == VM_UPDATE) {
+            $this->RefreshSirenStatus();
         }
     }
 
@@ -290,7 +223,7 @@ class UniFiAccessController extends IPSModule
      */
     public function CheckSirens(): void
     {
-        $this->QuerySirens();
+        $this->RefreshSirenStatus();
     }
 
     /**
@@ -298,20 +231,19 @@ class UniFiAccessController extends IPSModule
      */
     public function ShowSirenStatus(): void
     {
-        $this->QuerySirens();
+        $this->RefreshSirenStatus();
 
         $sirens = $this->BuildSirenPayload();
         if (count($sirens) === 0) {
-            echo 'Es ist kein MQTT-Topic konfiguriert.';
+            echo ('Es ist keine Sirenen-Variable konfiguriert.');
             return;
         }
 
-        $out = "Statusmeldung angefordert. Der Shelly antwortet per MQTT,\n"
-            . "die Werte unten sind der zuletzt empfangene Stand.\n\n";
+        $out = "Ist-Zustand laut Objektbaum:\n\n";
 
         foreach ($sirens as $siren) {
             $out .= ($siren['name'] !== '' ? $siren['name'] . ' - ' : '')
-                . $siren['topic'] . ' (Kanal ' . $siren['channel'] . ")\n";
+                . 'Variable #' . $siren['variable'] . "\n";
             if (!$siren['checked']) {
                 $out .= "  noch keine Meldung empfangen\n\n";
                 continue;
@@ -351,13 +283,13 @@ class UniFiAccessController extends IPSModule
                 break;
 
             case 'CheckSirens':
-                $this->QuerySirens();
+                $this->RefreshSirenStatus();
                 break;
 
             case 'TestSiren':
                 $data = json_decode((string) $Value, true);
                 if (is_array($data)) {
-                    $this->TestSiren((string) ($data['topic'] ?? ''), !empty($data['on']));
+                    $this->TestSiren((int) ($data['variable'] ?? 0), !empty($data['on']));
                 }
                 break;
 
@@ -535,9 +467,9 @@ class UniFiAccessController extends IPSModule
             $wanted    = !empty($desired[$key]['on']);
 
             $result[] = [
-                'topic'     => $siren['topic'],
+                'variable'  => (int) $siren['variable'],
                 'name'      => trim((string) ($siren['name'] ?? '')),
-                'channel'   => $siren['channel'],
+
                 'checked'   => $checked,
                 'reachable' => $reachable,
                 'output'    => $output,
@@ -619,7 +551,7 @@ class UniFiAccessController extends IPSModule
                 'DoorID'       => $id,
                 'AlarmEnabled' => false,
                 'OpenDelay'    => 60,
-                'ShellyTopic'  => '',
+                'SirenVariable' => 0,
                 'ShellyName'   => ''
             ];
             unset($byId[$id]);
@@ -663,25 +595,22 @@ class UniFiAccessController extends IPSModule
             : $removed . ' verwaiste Tuer(en) entfernt.';
     }
 
-    /**
+     * $VariableID ist die schaltbare Relais-Variable der Shelly-Instanz.
      * Schaltet eine einzelne Sirene zum Testen ein bzw. aus.
      * $Topic ist das MQTT-Topic-Praefix des Shelly, z. B. "shelly1g4-e4b0637526d0".
      */
-    public function TestSiren(string $Topic, bool $On): bool
+    public function TestSiren(int $VariableID, bool $On): bool
     {
-        $topic = trim($Topic, " \t\n\r/");
-        if ($topic === '') {
-            $this->LogMessage('Sirenentest ohne MQTT-Topic aufgerufen.', KL_ERROR);
+        if ($VariableID <= 0) {
+            $this->LogMessage('Sirenentest ohne Variable aufgerufen.', KL_ERROR);
             return false;
         }
 
-        $channel = $this->ReadPropertyInteger('ShellyChannel');
-        $key     = $topic . '|' . $channel;
-        $label   = $this->SirenLabelForKey($key);
-        $max     = $On ? $this->ReadPropertyInteger('SirenMaxRuntime') : 0;
+        $key   = (string) $VariableID;
+        $label = $this->SirenLabelForKey($key);
 
         $error = '';
-        $ok = $this->ShellySwitch($topic, $channel, $On, $max, $error);
+        $ok = $this->ShellySwitch($VariableID, $On, $error);
 
         if ($ok) {
             $this->LogMessage(sprintf(
@@ -701,7 +630,7 @@ class UniFiAccessController extends IPSModule
             $this->LogMessage('Sirene ' . $label . ' konnte nicht geschaltet werden: ' . $error, KL_ERROR);
         }
 
-        $this->QuerySirens([$key]);
+        $this->RefreshSirenStatus();
         return $ok;
     }
 
@@ -1020,7 +949,7 @@ class UniFiAccessController extends IPSModule
     {
         $state  = $this->ReadState();
         $config = $this->GetDoorConfig();
-        $now    = time();
+        $desired  = [];   // Variablen-ID => bool
 
         $desired  = [];   // "host|channel" => bool
         $pending  = false;
@@ -1047,7 +976,7 @@ class UniFiAccessController extends IPSModule
                 continue;
             }
 
-            $key = $cfg['topic'] . '|' . $cfg['channel'];
+            $key = (string) $cfg['variable'];
             if (!isset($desired[$key])) {
                 $desired[$key] = false;
             }
@@ -1112,19 +1041,18 @@ class UniFiAccessController extends IPSModule
         $switched = [];
 
         foreach ($desired as $key => $want) {
-            [$topic, $channel] = array_pad(explode("|", (string) $key, 2), 2, "0");
-            $channel = (int) $channel;
+            $variableID = (int) $key;
             $current = $applied[$key] ?? ['on' => false, 'since' => 0, 'muted' => false];
             $error   = '';
 
             if ($want) {
                 if (!empty($current['on']) && $max > 0 && ($now - (int) $current['since']) >= $max) {
                     // Maximale Laufzeit erreicht -> abschalten und stummschalten
-                    $this->ShellySwitch($topic, $channel, false, 0, $error);
+                    $this->ShellySwitch($variableID, false, $error);
                     $current    = ['on' => false, 'since' => 0, 'muted' => true];
                     $switched[] = $key;
                 } elseif (empty($current['on']) && empty($current['muted'])) {
-                    if ($this->ShellySwitch($topic, $channel, true, $max, $error)) {
+                    if ($this->ShellySwitch($variableID, true, $error)) {
                         $current = ['on' => true, 'since' => $now, 'muted' => false];
                     } else {
                         $this->LogMessage('Sirene ' . $this->SirenLabelForKey((string) $key) . ' konnte nicht eingeschaltet werden: ' . $error, KL_ERROR);
@@ -1133,7 +1061,7 @@ class UniFiAccessController extends IPSModule
                 }
             } else {
                 if (!empty($current['on'])) {
-                    if (!$this->ShellySwitch($topic, $channel, false, 0, $error)) {
+                    if (!$this->ShellySwitch($variableID, false, $error)) {
                         $this->LogMessage('Sirene ' . $this->SirenLabelForKey((string) $key) . ' konnte nicht ausgeschaltet werden: ' . $error, KL_ERROR);
                     }
                     $switched[] = $key;
@@ -1149,9 +1077,8 @@ class UniFiAccessController extends IPSModule
             if (isset($desired[$key]) || empty($current['on'])) {
                 continue;
             }
-            [$topic, $channel] = array_pad(explode("|", (string) $key, 2), 2, "0");
             $error = '';
-            $this->ShellySwitch($topic, (int) $channel, false, 0, $error);
+            $this->ShellySwitch((int) $key, false, $error);
             $applied[$key] = ['on' => false, 'since' => 0, 'muted' => false];
             $switched[]    = $key;
         }
@@ -1161,35 +1088,38 @@ class UniFiAccessController extends IPSModule
         // Direkt nach jedem Schaltvorgang nachfragen, ob der Shelly wirklich
         // reagiert hat - das ist der Moment, in dem es interessant ist.
         if (count($switched) > 0) {
-            $this->QuerySirens(array_values(array_unique($switched)));
+            $this->RefreshSirenStatus(false);
         }
     }
 
     /* ===================================================================== */
-    /* Shelly-Rueckfrage (Ist-Zustand)                                       */
+    /* Sirenen (Ist-Zustand)                                                 */
     /* ===================================================================== */
 
     /**
-     * Alle konfigurierten Shelly-Adressen, indiziert wie der Soll-Zustand ("host|kanal").
+     * Alle konfigurierten Sirenen, indiziert nach der Variablen-ID. Damit ist
+     * der Schluessel automatisch eindeutig, auch wenn sich mehrere Tueren eine
+     * Sirene teilen.
      */
     private function GetConfiguredSirens(): array
     {
         $result = [];
 
         foreach ($this->GetDoorConfig() as $cfg) {
-            if ($cfg['topic'] === '') {
+            $variable = (int) $cfg['variable'];
+            if ($variable <= 0) {
                 continue;
             }
-            $key = $cfg['topic'] . '|' . $cfg['channel'];
+            $key = (string) $variable;
+
             if (!isset($result[$key])) {
                 $result[$key] = [
-                    'topic'   => $cfg['topic'],
-                    'channel' => (int) $cfg['channel'],
-                    'name'    => $cfg['sirenName'],
-                    'doors'   => [$cfg['name']]
+                    'variable' => $variable,
+                    'name'     => $cfg['sirenName'] !== '' ? $cfg['sirenName'] : $this->DeriveSirenName($variable),
+                    'doors'    => [$cfg['name']]
                 ];
             } else {
-                // Teilen mehrere Tueren eine Sirene, genuegt es, den Namen einmal einzutragen
+                // Teilen mehrere Tueren eine Sirene, genuegt der Name in einer Zeile
                 if ($result[$key]['name'] === '' && $cfg['sirenName'] !== '') {
                     $result[$key]['name'] = $cfg['sirenName'];
                 }
@@ -1201,16 +1131,33 @@ class UniFiAccessController extends IPSModule
     }
 
     /**
-     * Anzeigename einer Sirene: "Name (Topic)" bzw. nur das Topic ohne Namen.
+     * Ohne eigene Bezeichnung wird der Name aus dem Objektbaum genommen -
+     * bevorzugt der der Shelly-Instanz, sonst der der Variablen.
+     */
+    private function DeriveSirenName(int $variableID): string
+    {
+        if ($variableID <= 0 || !IPS_VariableExists($variableID)) {
+            return '';
+        }
+        $instanceID = $this->OwningInstance($variableID);
+        if ($instanceID > 0) {
+            return (string) IPS_GetName($instanceID);
+        }
+        return (string) IPS_GetName($variableID);
+    }
+
+    /**
+     * Anzeigename einer Sirene: "Name (#Variablen-ID)".
      */
     private function SirenLabel(array $siren): string
     {
         $name = trim((string) ($siren['name'] ?? ''));
-        return $name !== '' ? $name . ' (' . $siren['topic'] . ')' : (string) $siren['topic'];
+        $ref  = '#' . (int) ($siren['variable'] ?? 0);
+        return $name !== '' ? $name . ' (' . $ref . ')' : $ref;
     }
 
     /**
-     * Anzeigename zu einem "topic|kanal"-Schluessel, fuer Logmeldungen.
+     * Anzeigename zu einem Schluessel (Variablen-ID), fuer Logmeldungen.
      */
     private function SirenLabelForKey(string $key): string
     {
@@ -1218,59 +1165,13 @@ class UniFiAccessController extends IPSModule
         if (isset($sirens[$key])) {
             return $this->SirenLabel($sirens[$key]);
         }
-        [$topic] = array_pad(explode("|", $key, 2), 2, "");
-        return $topic;
+        return '#' . $key;
     }
 
     /**
-     * Fragt jeden Shelly per Switch.GetStatus ab und legt das Ergebnis im
-     * Objektbaum sowie im Attribut SirenStatus ab.
-     *
-     * @param array $onlyKeys Leer = alle, sonst nur diese "host|kanal"-Schluessel
+     * Legt fuer jede Sirene einen Unterordner unter "Sirenen" an und schreibt
+     * Ist-, Soll- und Abweichungszustand hinein.
      */
-    /**
-     * Der Ist-Zustand kommt per MQTT von selbst. Diese Funktion raeumt nur den
-     * gespeicherten Zustand auf und bittet die Shellys um eine Statusmeldung -
-     * sinnvoll nach einem Neustart oder auf Knopfdruck.
-     */
-    private function QuerySirens(array $onlyKeys = []): void
-    {
-        $sirens = $this->GetConfiguredSirens();
-        if (count($sirens) === 0) {
-            $this->WriteSirenStatus([]);
-            $this->RemoveSirenTree();
-            $this->PushVisualization();
-            return;
-        }
-
-        $status = $this->ReadSirenStatus();
-
-        foreach ($sirens as $key => $siren) {
-            if (count($onlyKeys) > 0 && !in_array($key, $onlyKeys, true)) {
-                continue;
-            }
-
-            $error = '';
-            if (!$this->ShellyRequestStatus($siren['topic'], (int) $siren['channel'], $error)) {
-                $status[$key]['reachable'] = false;
-                $status[$key]['error']     = $error;
-                $status[$key]['ts']        = time();
-                $this->SendDebug('Shelly Status', $siren['topic'] . ': ' . $error, 0);
-            }
-        }
-
-        // Eintraege entfernen, die nicht mehr konfiguriert sind
-        foreach (array_keys($status) as $key) {
-            if (!isset($sirens[$key])) {
-                unset($status[$key]);
-            }
-        }
-
-        $this->WriteSirenStatus($status);
-        $this->UpdateSirenTree($sirens, $status);
-        $this->PushVisualization();
-    }
-
     private function UpdateSirenTree(array $sirens, array $status): void
     {
         $desired = json_decode($this->ReadAttributeString('SirenState'), true);
@@ -1289,7 +1190,7 @@ class UniFiAccessController extends IPSModule
             $name  = trim((string) ($siren['name'] ?? ''));
             $catID = $this->MaintainCategory(
                 $ident,
-                $name !== '' ? $name : 'Sirene ' . $siren['topic'],
+                $name !== '' ? $name : 'Sirene #' . $siren['variable'],
                 $position,
                 $rootID
             );
@@ -1311,9 +1212,8 @@ class UniFiAccessController extends IPSModule
 
             if ($mismatch) {
                 $this->LogMessage(sprintf(
-                    'Sirene %s, Kanal %d: Relais steht auf %s, erwartet wird %s.',
+                    'Sirene %s: Relais steht auf %s, erwartet wird %s.',
                     $this->SirenLabel($siren),
-                    $siren['channel'],
                     $output ? 'EIN' : 'AUS',
                     $wanted ? 'EIN' : 'AUS'
                 ), KL_WARNING);
@@ -1429,94 +1329,123 @@ class UniFiAccessController extends IPSModule
     }
 
     /* ===================================================================== */
-    /* Shelly 1 Gen4 ueber MQTT                                              */
+    /* Sirenen ueber Shelly-Instanzen im Objektbaum                          */
     /* ===================================================================== */
 
     /**
-     * Schaltet ein Shelly-Relais per RPC over MQTT.
-     *
-     * Der Befehl geht an <topic>/rpc, die Antwort laesst sich der Shelly ueber
-     * "src" nach <ReplyTopic>/rpc zurueckschicken. Den tatsaechlichen Zustand
-     * meldet er ohnehin unaufgefordert auf <topic>/status/switch:N.
+     * Schaltet eine Sirene, indem die Relais-Variable der Shelly-Instanz
+     * geschaltet wird. Wie der Shelly angebunden ist - MQTT, HTTP, welches
+     * Modul auch immer - spielt fuer uns keine Rolle.
      */
-    private function ShellySwitch(string $topic, int $channel, bool $on, int $toggleAfter, ?string &$error): bool
-    {
-        $error = '';
-        $topic = trim($topic, " \t\n\r/");
-        if ($topic === '') {
-            $error = 'Kein MQTT-Topic konfiguriert.';
-            return false;
-        }
-
-        $params = ['id' => $channel, 'on' => $on];
-        if ($on && $toggleAfter > 0) {
-            // Failsafe im Shelly, falls IP-Symcon zwischenzeitlich ausfaellt
-            $params['toggle_after'] = $toggleAfter;
-        }
-
-        $request = [
-            'id'     => time(),
-            'src'    => $this->ReplyTopic(),
-            'method' => 'Switch.Set',
-            'params' => $params
-        ];
-
-        return $this->MqttPublish($topic . '/rpc', (string) json_encode($request), $error);
-    }
-
-    /**
-     * Fragt den aktuellen Zustand eines Relais aktiv ab. Im Normalbetrieb
-     * unnoetig, weil der Shelly Aenderungen selbst meldet - hilft aber nach
-     * einem Neustart von IP-Symcon, den Ist-Zustand einmal einzusammeln.
-     */
-    private function ShellyRequestStatus(string $topic, int $channel, ?string &$error): bool
-    {
-        $error = '';
-        $topic = trim($topic, " \t\n\r/");
-        if ($topic === '') {
-            $error = 'Kein MQTT-Topic konfiguriert.';
-            return false;
-        }
-
-        $request = [
-            'id'     => time(),
-            'src'    => $this->ReplyTopic(),
-            'method' => 'Switch.GetStatus',
-            'params' => ['id' => $channel]
-        ];
-
-        return $this->MqttPublish($topic . '/rpc', (string) json_encode($request), $error);
-    }
-
-    private function MqttPublish(string $topic, string $payload, ?string &$error): bool
+    private function ShellySwitch(int $variableID, bool $on, ?string &$error): bool
     {
         $error = '';
 
-        if (!$this->HasActiveParent()) {
-            $error = 'Kein MQTT-Gateway verbunden.';
+        if ($variableID <= 0 || !IPS_VariableExists($variableID)) {
+            $error = 'Die konfigurierte Sirenen-Variable existiert nicht.';
             return false;
         }
 
-        $packet = [
-            'DataID'            => self::MQTT_TX_DATAID,
-            'PacketType'        => 3,  // PUBLISH
-            'QualityOfService'  => 0,
-            'Retain'            => false,
-            'Topic'             => $topic,
-            'Payload'           => $payload
-        ];
+        $variable = IPS_GetVariable($variableID);
+        if ((int) $variable['VariableType'] !== VARIABLETYPE_BOOLEAN) {
+            $error = 'Die Sirenen-Variable ist nicht vom Typ Boolean.';
+            return false;
+        }
+        if ((int) $variable['VariableAction'] <= 0 && (int) $variable['VariableCustomAction'] <= 0) {
+            $error = 'Die Sirenen-Variable ist nicht schaltbar (keine Aktion hinterlegt).';
+            return false;
+        }
 
-        $this->SendDebug('MQTT >', $topic . ' = ' . $payload, 0);
+        $this->SendDebug('Sirene schalten', '#' . $variableID . ' -> ' . ($on ? 'EIN' : 'AUS'), 0);
 
-        // JSON_UNESCAPED_SLASHES, damit die Schraegstriche im Topic erhalten bleiben
-        $result = @$this->SendDataToParent((string) json_encode($packet, JSON_UNESCAPED_SLASHES));
-        if ($result === false) {
-            $error = 'MQTT-Gateway hat die Nachricht nicht angenommen.';
+        if (!@RequestAction($variableID, $on)) {
+            $error = 'Das Shelly-Modul hat den Schaltbefehl nicht angenommen.';
             return false;
         }
 
         return true;
     }
+
+    /**
+     * Liest den Ist-Zustand aller Sirenen aus dem Objektbaum. Der Relaiszustand
+     * steht in der Variablen, die Erreichbarkeit ergibt sich aus dem Status der
+     * Shelly-Instanz, zu der sie gehoert.
+     */
+    private function RefreshSirenStatus(bool $push = true): void
+    {
+        $sirens = $this->GetConfiguredSirens();
+        if (count($sirens) === 0) {
+            $this->WriteSirenStatus([]);
+            $this->RemoveSirenTree();
+            if ($push) {
+                $this->PushVisualization();
+            }
+            return;
+        }
+
+        $status = [];
+        foreach ($sirens as $key => $siren) {
+            $varID = (int) $siren['variable'];
+
+            if ($varID <= 0 || !IPS_VariableExists($varID)) {
+                $status[$key] = [
+                    'reachable' => false,
+                    'output'    => null,
+                    'ts'        => time(),
+                    'error'     => 'Sirenen-Variable existiert nicht'
+                ];
+                continue;
+            }
+
+            $variable  = IPS_GetVariable($varID);
+            $instanceID = $this->OwningInstance($varID);
+            $reachable  = true;
+            $error      = '';
+
+            if ($instanceID > 0) {
+                $instanceStatus = (int) IPS_GetInstance($instanceID)['InstanceStatus'];
+                $reachable = ($instanceStatus === 102);
+                if (!$reachable) {
+                    $error = 'Shelly-Instanz meldet Status ' . $instanceStatus;
+                }
+            }
+
+            $status[$key] = [
+                'reachable' => $reachable,
+                'output'    => (bool) GetValue($varID),
+                'ts'        => (int) $variable['VariableUpdated'],
+                'error'     => $error
+            ];
+        }
+
+        $this->WriteSirenStatus($status);
+        $this->UpdateSirenTree($sirens, $status);
+        $this->EvaluateAlarms();
+
+        if ($push) {
+            $this->PushVisualization();
+        }
+    }
+
+    /**
+     * Sucht die Instanz, zu der eine Variable gehoert - notfalls ueber die
+     * Elternkette, falls die Variable in einer Kategorie liegt.
+     */
+    private function OwningInstance(int $variableID): int
+    {
+        $current = $variableID;
+        for ($depth = 0; $depth < 10 && $current > 0; $depth++) {
+            $current = (int) IPS_GetObject($current)['ParentID'];
+            if ($current <= 0) {
+                return 0;
+            }
+            if (IPS_GetObject($current)['ObjectType'] == 1 /* Instanz */) {
+                return $current;
+            }
+        }
+        return 0;
+    }
+
 
     private function ReadSirenStatus(): array
     {
@@ -1544,7 +1473,6 @@ class UniFiAccessController extends IPSModule
             return $result;
         }
 
-        $channel = $this->ReadPropertyInteger('ShellyChannel');
 
         foreach ($list as $row) {
             if (!is_array($row)) {
@@ -1555,10 +1483,10 @@ class UniFiAccessController extends IPSModule
                 continue;
             }
 
-            // Jede Tuer hat ihren eigenen Shelly, es gibt keinen Standard
-            $topic   = trim((string) ($row['ShellyTopic'] ?? ''), " \t\n\r/");
-            $enabled = (bool) ($row['AlarmEnabled'] ?? false);
-            if ($topic === '') {
+            // Jede Tuer hat ihre eigene Sirene, es gibt keinen Standard
+            $variable = (int) ($row['SirenVariable'] ?? 0);
+            $enabled  = (bool) ($row['AlarmEnabled'] ?? false);
+            if ($variable <= 0) {
                 // Ohne Sirene ergibt der Alarm keinen Sinn
                 $enabled = false;
             }
@@ -1567,8 +1495,7 @@ class UniFiAccessController extends IPSModule
                 'name'      => (string) ($row['DoorName'] ?? ''),
                 'enabled'   => $enabled,
                 'delay'     => max(1, (int) ($row['OpenDelay'] ?? 60)),
-                'topic'     => $topic,
-                'channel'   => $channel,
+                'variable'  => $variable,
                 'sirenName' => trim((string) ($row['ShellyName'] ?? ''))
             ];
         }

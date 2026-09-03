@@ -6,7 +6,7 @@ Bibliothek zur Anbindung eines UniFi Access Controllers an IP-Symcon.
 
 | Modul | Beschreibung |
 |---|---|
-| [UniFi Access Controller](UniFiAccessController) | Fragt die Türen eines UniFi Access Controllers per Developer-API ab, bildet sie im Objektbaum ab und kann pro Tür eine Sirene (Shelly 1 Gen4) auslösen, wenn die Tür zu lange offen steht |
+| [UniFi Access Controller](UniFiAccessController) | Fragt die Türen eines UniFi Access Controllers per Developer-API ab, bildet sie im Objektbaum ab und kann pro Tür eine Sirene über die schaltbare Relais-Variable einer Shelly-Instanz auslösen, wenn die Tür zu lange offen steht |
 | [UniFi Access Grundriss](UniFiAccessGrundriss) | Zeigt die Türen als eigene Kachel auf einem Grundriss, mit Platzieren per Drag & Drop. Mehrere Instanzen möglich, z. B. eine je Etage |
 
 Beide Module bringen ihre eigene Kachel für die Kachel-Visualisierung mit (HTML-SDK, ab
