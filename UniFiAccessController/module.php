@@ -460,6 +460,7 @@ class UniFiAccessController extends IPSModule
 
         $result = [];
         foreach ($this->GetConfiguredSirens() as $key => $siren) {
+            $key = (string) $key; // PHP macht aus numerischen Array-Schluesseln int
             $entry     = $status[$key] ?? [];
             $checked   = isset($entry['ts']);
             $reachable = !empty($entry['reachable']);
@@ -1041,6 +1042,7 @@ class UniFiAccessController extends IPSModule
         $switched = [];
 
         foreach ($desired as $key => $want) {
+            $key = (string) $key; // PHP macht aus numerischen Array-Schluesseln int
             $variableID = (int) $key;
             $current = $applied[$key] ?? ['on' => false, 'since' => 0, 'muted' => false];
             $error   = '';
@@ -1074,6 +1076,7 @@ class UniFiAccessController extends IPSModule
 
         // Shellys, die nicht mehr in der Konfiguration vorkommen, sicher abschalten
         foreach ($applied as $key => $current) {
+            $key = (string) $key; // PHP macht aus numerischen Array-Schluesseln int
             if (isset($desired[$key]) || empty($current['on'])) {
                 continue;
             }
@@ -1159,8 +1162,9 @@ class UniFiAccessController extends IPSModule
     /**
      * Anzeigename zu einem Schluessel (Variablen-ID), fuer Logmeldungen.
      */
-    private function SirenLabelForKey(string $key): string
+    private function SirenLabelForKey(int|string $key): string
     {
+        $key    = (string) $key;
         $sirens = $this->GetConfiguredSirens();
         if (isset($sirens[$key])) {
             return $this->SirenLabel($sirens[$key]);
@@ -1184,6 +1188,7 @@ class UniFiAccessController extends IPSModule
         $position = 10;
 
         foreach ($sirens as $key => $siren) {
+            $key = (string) $key; // PHP macht aus numerischen Array-Schluesseln int
             $ident  = $this->SirenIdent($key);
             $keep[] = $ident;
 
@@ -1237,9 +1242,14 @@ class UniFiAccessController extends IPSModule
         }
     }
 
-    private function SirenIdent(string $key): string
+    /**
+     * Die Sirenen sind mit (string) VariablenID verschluesselt. PHP wandelt
+     * numerische Array-Schluessel aber automatisch nach int zurueck, deshalb
+     * nehmen die Helfer beides an.
+     */
+    private function SirenIdent(int|string $key): string
     {
-        return self::SIREN_PREFIX . preg_replace('/[^A-Za-z0-9]/', '_', $key);
+        return self::SIREN_PREFIX . preg_replace('/[^A-Za-z0-9]/', '_', (string) $key);
     }
 
     /* ===================================================================== */
@@ -1385,6 +1395,7 @@ class UniFiAccessController extends IPSModule
 
         $status = [];
         foreach ($sirens as $key => $siren) {
+            $key = (string) $key; // PHP macht aus numerischen Array-Schluesseln int
             $varID = (int) $siren['variable'];
 
             if ($varID <= 0 || !IPS_VariableExists($varID)) {
