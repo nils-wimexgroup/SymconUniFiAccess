@@ -102,11 +102,11 @@ class UniFiAccessController extends IPSModule
             $this->SetStatus(self::STATUS_INACTIVE);
             return;
         }
-        if ($this->CleanHost($this->ReadPropertyString('Host')) === '') {
+        if ($this->CleanHost($this->ReadStringProperty('Host')) === '') {
             $this->SetStatus(self::STATUS_NO_HOST);
             return;
         }
-        if (trim($this->ReadPropertyString('Token')) === '') {
+        if (trim($this->ReadStringProperty('Token')) === '') {
             $this->SetStatus(self::STATUS_NO_TOKEN);
             return;
         }
@@ -135,7 +135,7 @@ class UniFiAccessController extends IPSModule
         }
         $wanted = array_values(array_unique($wanted));
 
-        $registered = json_decode($this->ReadAttributeString('WatchedVariables'), true);
+        $registered = $this->ReadJsonAttribute('WatchedVariables');
         if (!is_array($registered)) {
             $registered = [];
         }
@@ -449,11 +449,11 @@ class UniFiAccessController extends IPSModule
      */
     private function BuildSirenPayload(): array
     {
-        $status = json_decode($this->ReadAttributeString('SirenStatus'), true);
+        $status = $this->ReadJsonAttribute('SirenStatus');
         if (!is_array($status)) {
             $status = [];
         }
-        $desired = json_decode($this->ReadAttributeString('SirenState'), true);
+        $desired = $this->ReadJsonAttribute('SirenState');
         if (!is_array($desired)) {
             $desired = [];
         }
@@ -530,7 +530,7 @@ class UniFiAccessController extends IPSModule
             return;
         }
 
-        $existing = json_decode($this->ReadPropertyString('DoorSettings'), true);
+        $existing = json_decode($this->ReadStringProperty('DoorSettings', '[]'), true);
         if (!is_array($existing)) {
             $existing = [];
         }
@@ -621,7 +621,7 @@ class UniFiAccessController extends IPSModule
 
             // Nur den Soll-Zustand dieser Sirene zuruecksetzen, damit der Test
             // die Alarmlogik der anderen Sirenen nicht verfaelscht
-            $applied = json_decode($this->ReadAttributeString('SirenState'), true);
+            $applied = $this->ReadJsonAttribute('SirenState');
             if (is_array($applied)) {
                 unset($applied[$key]);
                 $this->WriteAttributeString('SirenState', (string) json_encode($applied));
@@ -1032,7 +1032,7 @@ class UniFiAccessController extends IPSModule
      */
     private function ApplySirens(array $desired): void
     {
-        $applied = json_decode($this->ReadAttributeString('SirenState'), true);
+        $applied = $this->ReadJsonAttribute('SirenState');
         if (!is_array($applied)) {
             $applied = [];
         }
@@ -1174,7 +1174,7 @@ class UniFiAccessController extends IPSModule
      */
     private function UpdateSirenTree(array $sirens, array $status): void
     {
-        $desired = json_decode($this->ReadAttributeString('SirenState'), true);
+        $desired = $this->ReadJsonAttribute('SirenState');
         if (!is_array($desired)) {
             $desired = [];
         }
@@ -1254,8 +1254,8 @@ class UniFiAccessController extends IPSModule
     private function ApiGetDoors(?string &$error): ?array
     {
         $error = '';
-        $host  = $this->CleanHost($this->ReadPropertyString('Host'));
-        $token = trim($this->ReadPropertyString('Token'));
+        $host  = $this->CleanHost($this->ReadStringProperty('Host'));
+        $token = trim($this->ReadStringProperty('Token'));
 
         if ($host === '') {
             $error = 'Es ist keine IP-Adresse konfiguriert.';
@@ -1449,7 +1449,7 @@ class UniFiAccessController extends IPSModule
 
     private function ReadSirenStatus(): array
     {
-        $status = json_decode($this->ReadAttributeString('SirenStatus'), true);
+        $status = $this->ReadJsonAttribute('SirenStatus');
         return is_array($status) ? $status : [];
     }
 
@@ -1463,12 +1463,41 @@ class UniFiAccessController extends IPSModule
     /* ===================================================================== */
 
     /**
+     * Liest ein JSON-Attribut und liefert immer ein Array.
+     *
+     * Fremde Module koennen die oeffentlichen Funktionen jederzeit aufrufen -
+     * auch waehrend eines Modul-Reloads, wenn Create() dieser Instanz noch
+     * nicht gelaufen ist. ReadAttributeString liefert dann false, und
+     * json_decode(false) ist unter PHP 8 ein Fatal Error. Darum die Pruefung.
+     */
+    private function ReadJsonAttribute(string $name): array
+    {
+        $raw = @$this->ReadAttributeString($name);
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * Liest ein String-Property, ohne bei einer noch nicht fertig erstellten
+     * Instanz auf die Nase zu fallen (siehe ReadJsonAttribute).
+     */
+    private function ReadStringProperty(string $name, string $default = ''): string
+    {
+        $raw = @$this->ReadPropertyString($name);
+        return is_string($raw) ? $raw : $default;
+    }
+
+    /**
      * Liest die Tuerkonfiguration aus dem Property, indiziert nach Tuer-ID.
      */
     private function GetDoorConfig(): array
     {
         $result = [];
-        $list = json_decode($this->ReadPropertyString('DoorSettings'), true);
+        $list = json_decode($this->ReadStringProperty('DoorSettings', '[]'), true);
         if (!is_array($list)) {
             return $result;
         }
@@ -1505,7 +1534,7 @@ class UniFiAccessController extends IPSModule
 
     private function ReadState(): array
     {
-        $state = json_decode($this->ReadAttributeString('DoorState'), true);
+        $state = $this->ReadJsonAttribute('DoorState');
         return is_array($state) ? $state : [];
     }
 
@@ -1602,7 +1631,7 @@ class UniFiAccessController extends IPSModule
 
     private function ReadEventLog(): array
     {
-        $log = json_decode($this->ReadAttributeString('EventLog'), true);
+        $log = $this->ReadJsonAttribute('EventLog');
         return is_array($log) ? $log : [];
     }
 
