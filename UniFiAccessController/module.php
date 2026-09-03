@@ -595,9 +595,9 @@ class UniFiAccessController extends IPSModule
             : $removed . ' verwaiste Tuer(en) entfernt.';
     }
 
-     * $VariableID ist die schaltbare Relais-Variable der Shelly-Instanz.
+    /**
      * Schaltet eine einzelne Sirene zum Testen ein bzw. aus.
-     * $Topic ist das MQTT-Topic-Praefix des Shelly, z. B. "shelly1g4-e4b0637526d0".
+     * $VariableID ist die schaltbare Relais-Variable der Shelly-Instanz.
      */
     public function TestSiren(int $VariableID, bool $On): bool
     {
